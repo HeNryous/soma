@@ -10,6 +10,14 @@ git clone https://github.com/HeNryous/soma.git && cd soma && ./install.sh
 ./start_soma.sh
 ```
 
+> **Public snapshot — not actively maintained.** Soma is shared as a
+> starting point, not a product. There's no roadmap, no issue triage,
+> no version cadence. Fork it, rewrite it, take what's useful and
+> leave the rest. It's built to be forked, in the spirit of the
+> ["Bitter Lesson for harnesses"](#research-that-informed-the-design)
+> reference below — every model release wants a different optimal
+> harness, so don't build on top of mine, build your own.
+
 A lightweight, model-agnostic agent harness that learns through interaction.
 
 Soma is the cell body of a neuron — the integrator where inputs from many
