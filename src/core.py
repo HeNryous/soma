@@ -10,6 +10,7 @@ Model-agnostic: no tool-call format, no model-specific parser.
 Any model that can answer in Markdown code blocks works.
 """
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -72,6 +73,13 @@ COMPRESS_COOLDOWN_ITERS = 10  # earliest re-trigger after N more iters
 
 # #12 Conflict-Detection
 CONFLICT_MIN_TAG_OVERLAP = 2
+
+# Repeat-block loop detection: if the model emits the exact same
+# code-block signature this many iterations in a row, abort the turn
+# and fall through to the budget-summary call. Threshold of 3 leaves
+# room for a legitimate retry-after-error pattern (which is usually 2
+# identical attempts), while still catching real Qwen-style loops.
+REPEAT_BLOCK_THRESHOLD = 3
 
 BASE_PROMPT = """\
 You are a warm, casual companion talking with someone you know well.
@@ -201,6 +209,18 @@ def extract_code_blocks(text: str) -> list[tuple[str, str]]:
         if code:
             blocks.append((lang, code))
     return blocks
+
+
+def block_signature(blocks: list[tuple[str, str]]) -> str:
+    """Stable hash of the (lang, normalized-code) tuples in one iteration.
+    Used to detect when the model emits the same code block(s) over and
+    over — a classic reasoning-model loop pattern."""
+    if not blocks:
+        return ""
+    joined = "\n---\n".join(
+        f"{lang}:{code.strip()[:300]}" for lang, code in blocks
+    )
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()
 
 
 async def execute(language: str, code: str) -> dict:
@@ -565,6 +585,11 @@ async def run(user_message: str) -> dict:
             if p.get("assistant"):
                 messages.append({"role": "assistant", "content": p["assistant"]})
         messages.append({"role": "user", "content": user_message})
+
+        # Repeat-block loop tracker (Qwen-style code-loop guard).
+        recent_signatures: list[str] = []
+        repeat_loop_detected = False
+
         for iteration in range(1, MAX_ITERATIONS + 1):
             # #8 compression check: test threshold before every model call
             need_compress = (
@@ -608,6 +633,25 @@ async def run(user_message: str) -> dict:
                     "messages": messages,
                 }
 
+            # Repeat-block loop check: same code-block signature N times
+            # in a row → the model is stuck. Skip execution, fall through
+            # to the budget-summary call so the user gets SOMETHING back.
+            sig = block_signature(blocks)
+            recent_signatures.append(sig)
+            recent_signatures = recent_signatures[-REPEAT_BLOCK_THRESHOLD:]
+            if (len(recent_signatures) >= REPEAT_BLOCK_THRESHOLD
+                    and len(set(recent_signatures)) == 1
+                    and sig):
+                events.log("repeat_block_loop",
+                           iteration=iteration,
+                           signature=sig[:12],
+                           threshold=REPEAT_BLOCK_THRESHOLD)
+                log.warning("repeat-block loop detected (sig=%s, %dx) — "
+                            "aborting turn", sig[:8], REPEAT_BLOCK_THRESHOLD)
+                repeat_loop_detected = True
+                messages.append({"role": "assistant", "content": text})
+                break
+
             messages.append({"role": "assistant", "content": text})
             results: list[str] = []
             for i, (lang, code) in enumerate(blocks, start=1):
@@ -622,9 +666,13 @@ async def run(user_message: str) -> dict:
                            code_snippet=code[:200])
             messages.append({"role": "user", "content": "\n\n".join(results)})
 
-        # Budget reached — summary call without further code blocks.
-        events.log("error", where="run", message="budget_exhausted",
-                   iterations=MAX_ITERATIONS,
+        # Budget reached OR repeat-loop detected — summary call without
+        # further code blocks. `iteration` retains its last value from
+        # the for loop, so it reflects when we actually stopped.
+        events.log("error", where="run",
+                   message=("repeat_block_loop" if repeat_loop_detected
+                            else "budget_exhausted"),
+                   iterations=iteration,
                    blocks_executed=blocks_executed)
         summary_messages = messages + [
             {"role": "system", "content": BUDGET_SUMMARY_PROMPT}
@@ -633,19 +681,19 @@ async def run(user_message: str) -> dict:
             final_text = await call_model(client, summary_messages)
         except Exception as exc:
             logger.exception("budget summary call failed: %s", exc)
-            final_text = (f"(budget reached after {MAX_ITERATIONS} "
-                          f"iterations, summary call failed: {exc})")
+            final_text = (f"(stopped at iteration {iteration}, "
+                          f"summary call failed: {exc})")
         if not final_text:
-            final_text = (f"(budget reached after {MAX_ITERATIONS} "
-                          "iterations — no summary output)")
-        events.log("response_sent", iterations=MAX_ITERATIONS,
+            final_text = (f"(stopped at iteration {iteration} — "
+                          "no summary output)")
+        events.log("response_sent", iterations=iteration,
                    blocks_executed=blocks_executed,
                    final_text=final_text[:1000])
 
     _post_run_maintenance(events, store, initial_mem_ids=initial_mem_ids)
     return {
         "ok": False,
-        "iterations": MAX_ITERATIONS,
+        "iterations": iteration,
         "blocks_executed": blocks_executed,
         "final_text": final_text,
         "messages": messages,

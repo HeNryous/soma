@@ -313,6 +313,107 @@ def test_classify_handles_call_failure():
     print("✓ classify_handles_call_failure")
 
 
+def test_block_signature_stable():
+    """Same blocks → same signature. Different blocks → different signature."""
+    from core import block_signature
+    a = [("shell", "echo hi")]
+    b = [("shell", "echo hi")]
+    c = [("shell", "echo bye")]
+    assert block_signature(a) == block_signature(b)
+    assert block_signature(a) != block_signature(c)
+    assert block_signature([]) == ""
+    print("✓ block_signature_stable")
+
+
+def test_repeat_block_loop_detected():
+    """3 identical iterations in a row → repeat_block_loop event + abort."""
+    import asyncio
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    from core import run
+    from events import EventLog
+
+    with tempfile.TemporaryDirectory() as td:
+        events_p = Path(td) / "events.jsonl"
+        memory_p = Path(td) / "memory.jsonl"
+        workspace = Path(td) / "workspace"
+        workspace.mkdir(parents=True)
+        memory_p.parent.mkdir(parents=True, exist_ok=True)
+
+        import core as core_mod
+        original_event_path = core_mod.EVENT_PATH
+        original_memory_path = core_mod.MEMORY_PATH
+        core_mod.EVENT_PATH = str(events_p)
+        core_mod.MEMORY_PATH = str(memory_p)
+
+        try:
+            # call_model always returns the SAME shell block → repeat-loop.
+            stuck_response = "```shell\necho stuck\n```"
+
+            async def fake_call(client, messages, **kwargs):
+                return stuck_response
+
+            async def fake_execute(lang, code):
+                return {"ok": True, "out": "stuck", "err": ""}
+
+            async def fake_classify_correction(*args, **kwargs):
+                return None
+
+            async def fake_classify_memory_promise(*args, **kwargs):
+                return None
+
+            async def go():
+                with patch("core.call_model", fake_call), \
+                     patch("core.execute", fake_execute), \
+                     patch("core.classify_correction",
+                           fake_classify_correction), \
+                     patch("core.classify_memory_promise",
+                           fake_classify_memory_promise):
+                    result = await run("please do something")
+                return result
+
+            result = asyncio.run(go())
+
+            # Loop should have fired; ok=False (budget exhausted path)
+            assert result["ok"] is False
+            # Way fewer iterations than MAX_ITERATIONS=100 — loop stopped early
+            assert result["iterations"] <= 5, \
+                f"expected early stop, ran {result['iterations']} iters"
+
+            ev = EventLog(events_p)
+            loop_events = ev.by_type("repeat_block_loop")
+            assert len(loop_events) >= 1, "repeat_block_loop never logged"
+            assert loop_events[0]["threshold"] == 3
+            print("✓ repeat_block_loop_detected")
+        finally:
+            core_mod.EVENT_PATH = original_event_path
+            core_mod.MEMORY_PATH = original_memory_path
+
+
+def test_repeat_block_no_false_positive_on_two():
+    """2 identical blocks should NOT trigger (legitimate retry-after-error)."""
+    from core import block_signature, REPEAT_BLOCK_THRESHOLD
+    assert REPEAT_BLOCK_THRESHOLD == 3, \
+        "threshold change would alter false-positive behavior"
+    # Manual simulation of the tracker logic
+    sigs = []
+    a = block_signature([("shell", "echo hi")])
+    sigs.append(a); sigs = sigs[-REPEAT_BLOCK_THRESHOLD:]
+    fires = (len(sigs) >= REPEAT_BLOCK_THRESHOLD
+             and len(set(sigs)) == 1 and sigs[-1])
+    assert not fires, "fires on 1"
+    sigs.append(a); sigs = sigs[-REPEAT_BLOCK_THRESHOLD:]
+    fires = (len(sigs) >= REPEAT_BLOCK_THRESHOLD
+             and len(set(sigs)) == 1 and sigs[-1])
+    assert not fires, "fires on 2 — false positive"
+    sigs.append(a); sigs = sigs[-REPEAT_BLOCK_THRESHOLD:]
+    fires = (len(sigs) >= REPEAT_BLOCK_THRESHOLD
+             and len(set(sigs)) == 1 and sigs[-1])
+    assert fires, "doesn't fire on 3"
+    print("✓ repeat_block_no_false_positive_on_two")
+
+
 if __name__ == "__main__":
     test_threshold_constant()
     test_auto_fuse_runs_every_time()
@@ -330,4 +431,7 @@ if __name__ == "__main__":
     test_classify_memory_promise_yes()
     test_classify_memory_promise_skips_when_blocks_executed()
     test_classify_handles_call_failure()
+    test_block_signature_stable()
+    test_repeat_block_no_false_positive_on_two()
+    test_repeat_block_loop_detected()
     print("\nAll core tests passed.")
