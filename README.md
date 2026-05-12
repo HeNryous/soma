@@ -6,7 +6,7 @@
 
 ```bash
 git clone https://github.com/HeNryous/soma.git && cd soma && ./install.sh
-$EDITOR .env        # paste your Telegram token + chat-id + LLM endpoint
+# then edit .env: paste your Telegram token, chat-id, LLM endpoint + model
 ./start_soma.sh
 ```
 
