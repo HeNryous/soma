@@ -377,7 +377,8 @@ def test_repeat_block_loop_detected():
 
             # Loop should have fired; ok=False (budget exhausted path)
             assert result["ok"] is False
-            # Way fewer iterations than MAX_ITERATIONS=100 — loop stopped early
+            # No iter cap exists anymore; repeat-block detector is the
+            # only forced exit. Should stop within a handful of iters.
             assert result["iterations"] <= 5, \
                 f"expected early stop, ran {result['iterations']} iters"
 

@@ -59,7 +59,13 @@ _SOMA_DATA = _os.environ.get("SOMA_DATA",
 MEMORY_PATH = _os.path.join(_SOMA_DATA, "workspace", "memories.jsonl")
 EVENT_PATH = _os.path.join(_SOMA_DATA, "events.jsonl")
 
-MAX_ITERATIONS = 100
+# No iteration cap. The task runs as long as the model keeps making
+# progress, with two exit paths:
+#   1. Model returns plain text → natural completion
+#   2. Repeat-block detector fires → forced stop + budget-summary
+# Context is kept bounded by auto-compression (Head-Middle-Tail), so a
+# multi-hour task with hundreds of iterations stays inside the LLM's
+# context window.
 EXEC_TIMEOUT = 30
 OUTPUT_MAX = 4000
 
@@ -251,10 +257,11 @@ async def execute(language: str, code: str) -> dict:
 
 
 BUDGET_SUMMARY_PROMPT = (
-    "You have reached the iteration budget. Answer NOW as text — a "
-    "compact summary of what you did and found, plus what's still "
-    "open. NO further code blocks, just prose. Stick to the Behavior "
-    "Rules above."
+    "You are stuck in a loop: the same code block has been emitted "
+    "three times in a row without progress. Answer NOW as text — a "
+    "compact summary of what you've done, what you found, and what "
+    "is still open. NO further code blocks, just prose. Stick to the "
+    "Behavior Rules above."
 )
 
 COMPRESS_SYSTEM_PROMPT = (
@@ -590,7 +597,9 @@ async def run(user_message: str) -> dict:
         recent_signatures: list[str] = []
         repeat_loop_detected = False
 
-        for iteration in range(1, MAX_ITERATIONS + 1):
+        iteration = 0
+        while True:
+            iteration += 1
             # #8 compression check: test threshold before every model call
             need_compress = (
                 (len(messages) > COMPRESS_THRESHOLD_MESSAGES
@@ -666,12 +675,10 @@ async def run(user_message: str) -> dict:
                            code_snippet=code[:200])
             messages.append({"role": "user", "content": "\n\n".join(results)})
 
-        # Budget reached OR repeat-loop detected — summary call without
-        # further code blocks. `iteration` retains its last value from
-        # the for loop, so it reflects when we actually stopped.
-        events.log("error", where="run",
-                   message=("repeat_block_loop" if repeat_loop_detected
-                            else "budget_exhausted"),
+        # Only reachable when repeat-block loop fired (the only forced
+        # exit from the while loop). Emit a budget-summary so the user
+        # still gets a textual answer.
+        events.log("error", where="run", message="repeat_block_loop",
                    iterations=iteration,
                    blocks_executed=blocks_executed)
         summary_messages = messages + [
@@ -681,11 +688,12 @@ async def run(user_message: str) -> dict:
             final_text = await call_model(client, summary_messages)
         except Exception as exc:
             logger.exception("budget summary call failed: %s", exc)
-            final_text = (f"(stopped at iteration {iteration}, "
+            final_text = (f"(stopped at iteration {iteration} "
+                          f"after repeat-block loop, "
                           f"summary call failed: {exc})")
         if not final_text:
-            final_text = (f"(stopped at iteration {iteration} — "
-                          "no summary output)")
+            final_text = (f"(stopped at iteration {iteration} after "
+                          "repeat-block loop — no summary output)")
         events.log("response_sent", iterations=iteration,
                    blocks_executed=blocks_executed,
                    final_text=final_text[:1000])
