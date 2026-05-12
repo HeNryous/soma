@@ -1,4 +1,4 @@
-"""Status-Dashboard CLI. `python status.py` → menschenlesbare Übersicht."""
+"""Status dashboard CLI. `python status.py` → human-readable overview."""
 import sys
 
 from core import EVENT_PATH, MEMORY_PATH

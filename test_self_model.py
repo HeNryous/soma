@@ -1,6 +1,5 @@
 """Smoke test for self_model."""
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from events import EventLog
@@ -24,13 +23,13 @@ def test_derive_counts():
     with tempfile.TemporaryDirectory() as td:
         s = MemoryStore(Path(td) / "m.jsonl")
         e = EventLog(Path(td) / "e.jsonl")
-        s.append("semantic", "Alex wohnt in DE")
-        s.append("semantic", "User mag knappe Antworten", tags=["preference"])
+        s.append("semantic", "Alex lives in Germany")
+        s.append("semantic", "User prefers concise replies", tags=["preference"])
         s.append("procedural", "PROCEDURE: shell:echo …",
                  tags=["crystallized", "shell", "echo"])
         s.append("procedural", "PROCEDURE: python:print …",
                  tags=["crystallized", "python", "print"])
-        s.append("episodic", "heutiges Ereignis")
+        s.append("episodic", "todays event")
         d = derive(s, e)
         assert d["total_memories"] == 5
         assert d["memory_counts"]["semantic"] == 2
@@ -38,7 +37,7 @@ def test_derive_counts():
         assert d["memory_counts"]["episodic"] == 1
         assert "shell:echo" in d["skills"]
         assert "python:print" in d["skills"]
-        assert any("knappe" in b for b in d["behaviors"])
+        assert any("concise" in b for b in d["behaviors"])
         print("✓ derive_counts")
 
 
@@ -46,19 +45,19 @@ def test_derive_today_events():
     with tempfile.TemporaryDirectory() as td:
         s = MemoryStore(Path(td) / "m.jsonl")
         e = EventLog(Path(td) / "e.jsonl")
-        # heutige events
+        # today's events
         for i in range(3):
             e.log("prompt_received", user_message=f"hi {i}")
         for i in range(5):
             e.log("code_executed", iteration=1, lang="shell", ok=True)
-        # 1 alter event (manuelle insert)
+        # one old event (manual insert)
         p = Path(td) / "e.jsonl"
         with p.open("a") as f:
             f.write('{"ts": "2025-01-01T00:00:00", "type": "prompt_received"}\n')
         d = derive(s, e)
-        assert d["prompts_today"] == 3  # alter event darf nicht zählen
+        assert d["prompts_today"] == 3  # old event must not count
         assert d["code_today"] == 5
-        assert d["last_activity"]  # nicht leer
+        assert d["last_activity"]  # non-empty
         print("✓ derive_today_events")
 
 
@@ -67,7 +66,7 @@ def test_summarize_empty():
         s = MemoryStore(Path(td) / "m.jsonl")
         e = EventLog(Path(td) / "e.jsonl")
         out = summarize(s, e)
-        assert "noch keine Memories" in out
+        assert "no memories yet" in out.lower()
         print("✓ summarize_empty")
 
 
@@ -79,9 +78,9 @@ def test_summarize_with_skills():
                  tags=["crystallized", "shell", "echo"])
         s.append("procedural", "PROCEDURE: shell:cat …",
                  tags=["crystallized", "shell", "cat"])
-        s.append("semantic", "Alex wohnt in DE")
+        s.append("semantic", "Alex lives in Germany")
         out = summarize(s, e)
-        assert "3 Memories" in out
+        assert "3 memories" in out.lower()
         assert "shell:echo" in out
         assert "shell:cat" in out
         print("✓ summarize_with_skills")

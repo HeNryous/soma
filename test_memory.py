@@ -1,5 +1,4 @@
 """Smoke test for MemoryStore."""
-import json
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -11,15 +10,15 @@ def test_roundtrip():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
         assert store.load() == []
-        store.append("semantic", "User heißt Alex", tags=["name", "user"])
-        store.append("procedural", "Datei erstellen: echo X > /workspace/Y",
+        store.append("semantic", "User's name is Alex", tags=["name", "user"])
+        store.append("procedural", "Create file: echo X > /workspace/Y",
                      tags=["file", "create"])
-        store.append("episodic", "Erstes Gespräch heute Abend")
+        store.append("episodic", "First conversation this evening")
         ms = store.load()
         assert len(ms) == 3
         assert ms[0]["id"] == "mem_0001"
         assert ms[0]["type"] == "semantic"
-        assert ms[0]["content"] == "User heißt Alex"
+        assert ms[0]["content"] == "User's name is Alex"
         assert "name" in ms[0]["tags"]
         print("✓ roundtrip")
 
@@ -39,13 +38,13 @@ def test_by_type():
 def test_search():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "Alex wohnt in Deutschland", tags=["location"])
-        store.append("semantic", "Lieblingsfarbe ist blau", tags=["preference"])
+        store.append("semantic", "Alex lives in Germany", tags=["location"])
+        store.append("semantic", "Favorite color is blue", tags=["preference"])
         hits = store.search("Alex")
         assert len(hits) == 1
         hits = store.search("preference")
         assert len(hits) == 1
-        hits = store.search("egal")
+        hits = store.search("missing")
         assert hits == []
         print("✓ search")
 
@@ -53,10 +52,10 @@ def test_search():
 def test_conflict_check():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "User heißt Alex")
-        hits = store.conflict_check("User heißt Alex Müller", threshold=0.6)
+        store.append("semantic", "User's name is Alex")
+        hits = store.conflict_check("User's name is Alex Smith", threshold=0.6)
         assert len(hits) == 1
-        hits = store.conflict_check("Wetter ist gut", threshold=0.6)
+        hits = store.conflict_check("Weather is fine", threshold=0.6)
         assert hits == []
         print("✓ conflict_check")
 
@@ -64,43 +63,43 @@ def test_conflict_check():
 def test_format_for_prompt():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "User heißt Alex")
+        store.append("semantic", "User's name is Alex")
         store.append("procedural", "echo X > /workspace/Y")
         block = format_for_prompt(store.load())
         assert "Facts:" in block
         assert "Learned procedures:" in block
         assert "Alex" in block
-        # Semantic muss VOR Procedural kommen (Reihenfolge im Render)
+        # Semantic must come BEFORE procedural (render order)
         assert block.index("Facts:") < block.index("Learned procedures:")
         print("✓ format_for_prompt")
 
 
 def test_format_behaviors_first():
-    """style memories (Tag preference/style) bekommen Vorrang-Block."""
+    """Style memories (preference/style tag) get the priority block."""
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "User heißt Alex", tags=["name"])
-        store.append("semantic", "User bevorzugt knappe Antworten",
+        store.append("semantic", "User's name is Alex", tags=["name"])
+        store.append("semantic", "User prefers concise replies",
                      tags=["preference"])
-        store.append("procedural", "Datei erstellen: echo X > /workspace/Y",
+        store.append("procedural", "Create file: echo X > /workspace/Y",
                      tags=["file"])
         block = format_for_prompt(store.load())
         assert "Behavior Rules" in block
-        assert "knappe Antworten" in block
-        # Behavior Rules muss als ERSTES kommen
+        assert "concise replies" in block
+        # Behavior Rules must come FIRST
         assert block.index("Behavior Rules") < block.index("Facts:")
         assert block.index("Facts:") < block.index("Learned procedures:")
-        # User-Name ist KEINE Verhaltensvorgabe, gehört zu Fakten
-        verhaltens_section = block[
+        # User's name is NOT a behavior rule, belongs in facts
+        behavior_section = block[
             block.index("Behavior Rules"):block.index("Facts:")
         ]
-        assert "Alex" not in verhaltens_section
-        assert "knappe" in verhaltens_section
+        assert "Alex" not in behavior_section
+        assert "concise" in behavior_section
         print("✓ format_behaviors_first")
 
 
 def test_robust_to_garbage():
-    """Modell schreibt manchmal Mist. Loader muss überleben."""
+    """The model sometimes writes garbage. The loader must survive."""
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "m.jsonl"
         p.write_text(
@@ -133,7 +132,7 @@ def test_mark_used():
         store.mark_used("mem_0001")
         m1 = next(m for m in store.load() if m["id"] == "mem_0001")
         assert m1["use_count"] == 2
-        # Andere unverändert
+        # Others unchanged
         m2 = next(m for m in store.load() if m["id"] == "mem_0002")
         assert m2.get("use_count", 0) == 0
         assert store.mark_used("mem_9999") is False
@@ -143,24 +142,24 @@ def test_mark_used():
 def test_prune_preserves_style():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "User bevorzugt knappe Antworten",
+        store.append("semantic", "User prefers concise replies",
                      tags=["preference"])
-        store.append("semantic", "User mag Dunkelmodus", tags=["style"])
+        store.append("semantic", "User likes dark mode", tags=["style"])
         for i in range(8):
             store.append("episodic", f"random episode {i}")
         # Keep=3: 2 style memories are immortal → 3 = 2 + 1 mortal
         removed = store.prune(keep=3)
         ms = store.load()
         contents = [m["content"] for m in ms]
-        assert "User bevorzugt knappe Antworten" in contents
-        assert "User mag Dunkelmodus" in contents
+        assert "User prefers concise replies" in contents
+        assert "User likes dark mode" in contents
         assert len(ms) == 3
         assert removed == 7
         print("✓ prune_preserves_style")
 
 
 def test_prune_immortals_exceed_keep():
-    """Wenn mehr style memories als keep existieren, bleiben sie alle."""
+    """When more style memories than `keep` exist, they all stay."""
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
         for i in range(5):
@@ -168,10 +167,10 @@ def test_prune_immortals_exceed_keep():
         # 3 mortal
         for i in range(3):
             store.append("episodic", f"episode {i}")
-        # keep=2 darf die 5 immortals NICHT killen
+        # keep=2 must NOT kill the 5 immortals
         removed = store.prune(keep=2)
         ms = store.load()
-        # Alle 5 immortals + 0 mortals (weil 5 > keep=2)
+        # All 5 immortals + 0 mortals (because 5 > keep=2)
         assert len(ms) == 5
         assert all("preference" in (m.get("tags") or []) for m in ms)
         assert removed == 3
@@ -181,36 +180,36 @@ def test_prune_immortals_exceed_keep():
 def test_fuse_merges_duplicates():
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        store.append("semantic", "User mag Kaffee mit Milch", tags=["food"])
-        store.append("semantic", "User mag Kaffee mit Milch",
+        store.append("semantic", "User likes coffee with milk", tags=["food"])
+        store.append("semantic", "User likes coffee with milk",
                      tags=["beverage"])
-        store.append("semantic", "Wetter ist gut heute")
+        store.append("semantic", "Weather is fine today")
         merged = store.fuse(threshold=0.8)
         ms = store.load()
         assert merged == 1
         assert len(ms) == 2
         contents = [m["content"] for m in ms]
-        assert "Wetter ist gut heute" in contents
-        # Tags wurden vereinigt
-        kaffee = next(m for m in ms if "Kaffee" in m["content"])
-        assert "food" in kaffee["tags"]
-        assert "beverage" in kaffee["tags"]
-        # use_count gestiegen (>=1 wegen merge-bonus)
-        assert kaffee["use_count"] >= 1
+        assert "Weather is fine today" in contents
+        # Tags were unified
+        coffee = next(m for m in ms if "coffee" in m["content"])
+        assert "food" in coffee["tags"]
+        assert "beverage" in coffee["tags"]
+        # use_count went up (>=1 because of merge bonus)
+        assert coffee["use_count"] >= 1
         print("✓ fuse_merges_duplicates")
 
 
 def test_fuse_respects_type_and_style():
-    """Fuse mergt NICHT über type-grenzen und NICHT preference↔non-preference.
-    Threshold=0.9 schließt false-positives durch Stopword-Overlap aus."""
+    """Fuse does NOT merge across types and NOT across preference vs non-preference.
+    Threshold=0.9 excludes false positives from stop-word overlap."""
     with tempfile.TemporaryDirectory() as td:
         store = MemoryStore(Path(td) / "m.jsonl")
-        # Same content, different type → type-Check blockt
-        store.append("semantic", "User mag Kaffee")
-        store.append("episodic", "User mag Kaffee")
-        # Same content, mixed preference → style-Check blockt
-        store.append("semantic", "User mag Tee", tags=["preference"])
-        store.append("semantic", "User mag Tee", tags=["random"])
+        # Same content, different type → type-check blocks
+        store.append("semantic", "User likes coffee")
+        store.append("episodic", "User likes coffee")
+        # Same content, mixed preference → style-check blocks
+        store.append("semantic", "User likes tea", tags=["preference"])
+        store.append("semantic", "User likes tea", tags=["random"])
         merged = store.fuse(threshold=0.9)
         ms = store.load()
         assert merged == 0, f"unexpected merges: {ms}"
@@ -219,7 +218,7 @@ def test_fuse_respects_type_and_style():
 
 
 def test_score_ordering():
-    """Hoher use_count + neulich genutzt → höherer score."""
+    """High use_count + recently used → higher score."""
     from memory import score
     fresh_used = {"type": "semantic", "use_count": 10,
                   "last_used": datetime.now().isoformat(timespec="seconds"),
@@ -227,7 +226,7 @@ def test_score_ordering():
     old_unused = {"type": "semantic", "use_count": 0,
                   "created_at": "2025-01-01T00:00:00", "tags": []}
     assert score(fresh_used) > score(old_unused)
-    # style memory ist inf
+    # Style memory is inf
     style = {"type": "semantic", "use_count": 0, "tags": ["preference"]}
     assert score(style) == float("inf")
     print("✓ score_ordering")
@@ -237,22 +236,22 @@ def test_find_tag_conflicts():
     with tempfile.TemporaryDirectory() as td:
         s = MemoryStore(Path(td) / "m.jsonl")
         s.append("semantic", "Acme in Berlin", tags=["customer", "acme"])
-        s.append("semantic", "Anderes Thema", tags=["domain"])
-        # New mem mit gleichem type + 2 shared tags
+        s.append("semantic", "Another topic", tags=["domain"])
+        # New mem with same type + 2 shared tags
         new1 = {"type": "semantic", "content": "Acme in Hamburg",
                 "tags": ["customer", "acme"]}
         hits = s.find_tag_conflicts(new1)
         assert len(hits) == 1
         assert "Berlin" in hits[0]["content"]
-        # New mem mit gleichem type + nur 1 shared tag → kein hit
-        new2 = {"type": "semantic", "content": "Acme irgendwo",
+        # New mem with same type + only 1 shared tag → no hit
+        new2 = {"type": "semantic", "content": "Acme somewhere",
                 "tags": ["customer", "geo"]}
         assert s.find_tag_conflicts(new2) == []
-        # Exact-content match → KEIN conflict (Fuse-Job)
+        # Exact-content match → NO conflict (fuse's job)
         new3 = {"type": "semantic", "content": "Acme in Berlin",
                 "tags": ["customer", "acme"]}
         assert s.find_tag_conflicts(new3) == []
-        # Different type → kein hit
+        # Different type → no hit
         new4 = {"type": "procedural", "content": "Acme process",
                 "tags": ["customer", "acme"]}
         assert s.find_tag_conflicts(new4) == []
@@ -260,7 +259,7 @@ def test_find_tag_conflicts():
 
 
 def test_immortal_tags_extend_style():
-    """domain/role/identity sind jetzt auch unsterblich."""
+    """domain/role/identity are also immortal now."""
     from memory import IMMORTAL_TAGS, STYLE_TAGS, score
     assert STYLE_TAGS <= IMMORTAL_TAGS
     assert "domain" in IMMORTAL_TAGS
@@ -297,27 +296,27 @@ def test_read_context_selection():
 def test_format_for_prompt_selected():
     from memory import format_for_prompt_selected
     mems = [
-        {"id": "mem_0001", "type": "semantic", "content": "User mag knapp",
+        {"id": "mem_0001", "type": "semantic", "content": "User likes concise",
          "tags": ["preference"]},
         {"id": "mem_0002", "type": "semantic",
-         "content": "Acme ist Hauptkunde", "tags": ["customer", "acme"]},
+         "content": "Acme is the main customer", "tags": ["customer", "acme"]},
         {"id": "mem_0003", "type": "semantic",
-         "content": "Beta hat 50 Server", "tags": ["customer", "beta"]},
+         "content": "Beta has 50 servers", "tags": ["customer", "beta"]},
         {"id": "mem_0004", "type": "semantic",
          "content": "DDR4 EOL 2025", "tags": ["fact", "memory"]},
     ]
     block = format_for_prompt_selected(mems, ["mem_0002"],
-                                        user_query="Was weißt du über Beta?")
+                                        user_query="What do you know about Beta?")
     assert "Behavior Rules" in block
     assert "Relevant context" in block
     assert "Acme" in block
     assert "Further memories" in block
     assert "Beta" in block
     assert "DDR4" not in block
-    i_verh = block.index("Behavior Rules")
+    i_behav = block.index("Behavior Rules")
     i_sel = block.index("Relevant context")
     i_more = block.index("Further memories")
-    assert i_verh < i_sel < i_more
+    assert i_behav < i_sel < i_more
     print("✓ format_for_prompt_selected")
 
 

@@ -1,4 +1,4 @@
-"""Smoke test for telegram.py — Helpers ohne Live-Connection."""
+"""Smoke test for telegram.py — helpers without a live connection."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
@@ -6,28 +6,28 @@ import telegram as tg
 
 
 def test_safe_send_short():
-    """Kurze Texte werden 1:1 versendet."""
+    """Short texts are sent verbatim."""
     msg = MagicMock()
     msg.answer = AsyncMock()
-    asyncio.run(tg._safe_send(msg, "kurzer text"))
-    msg.answer.assert_awaited_once_with("kurzer text")
+    asyncio.run(tg._safe_send(msg, "short text"))
+    msg.answer.assert_awaited_once_with("short text")
     print("✓ safe_send_short")
 
 
 def test_safe_send_truncates():
-    """Lange Texte werden bei TELEGRAM_MAX gekürzt."""
+    """Long texts are truncated at TELEGRAM_MAX."""
     msg = MagicMock()
     msg.answer = AsyncMock()
     long_text = "x" * (tg.TELEGRAM_MAX + 500)
     asyncio.run(tg._safe_send(msg, long_text))
     sent = msg.answer.call_args[0][0]
     assert len(sent) <= tg.TELEGRAM_MAX + 100  # plus marker
-    assert "gekürzt" in sent
+    assert "truncated" in sent
     print("✓ safe_send_truncates")
 
 
 def test_safe_send_empty():
-    """Leere Strings → kein API-Call."""
+    """Empty strings → no API call."""
     msg = MagicMock()
     msg.answer = AsyncMock()
     asyncio.run(tg._safe_send(msg, ""))

@@ -1,4 +1,4 @@
-"""Smoke test for core.py auto-maintenance (ohne vLLM-Call)."""
+"""Smoke test for core.py auto-maintenance (no vLLM call)."""
 import tempfile
 from pathlib import Path
 
@@ -8,14 +8,14 @@ from core import _post_run_maintenance, AUTO_CRYSTALLIZE_THRESHOLD
 
 
 def test_auto_fuse_runs_every_time():
-    """Auto-Fuse mergt duplicates auch bei kleiner Memory-Count."""
+    """Auto-fuse also merges duplicates with a small memory count."""
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
         events = EventLog(events_p)
         ml = MemoryStore(memory_p)
-        ml.append("semantic", "User mag Kaffee")
-        ml.append("semantic", "User mag Kaffee")  # dup
+        ml.append("semantic", "User likes coffee")
+        ml.append("semantic", "User likes coffee")  # dup
         _post_run_maintenance(events, ml)
         assert len(ml.load()) == 1
         assert events.last("memory_fused") is not None
@@ -41,7 +41,7 @@ def test_auto_crystallize_triggers_at_threshold():
         memory_p = Path(td) / "memory.jsonl"
         events = EventLog(events_p)
         ml = MemoryStore(memory_p)
-        # Seed 25 echo events (über default-threshold 20)
+        # Seed 25 echo events (above the default threshold of 20)
         for i in range(25):
             events.log("code_executed", iteration=1, lang="shell", ok=True,
                        code_snippet=f"echo 'x{i}' > /tmp/{i}.txt")
@@ -49,7 +49,7 @@ def test_auto_crystallize_triggers_at_threshold():
         last = events.last("auto_crystallized")
         assert last is not None, "auto_crystallized event missing"
         assert last["new_skills"] >= 1
-        # Memory hat neuen procedural entry
+        # Memory has a new procedural entry
         mems = ml.load()
         proc = [m for m in mems
                 if m["type"] == "procedural"
@@ -73,13 +73,13 @@ def test_auto_crystallize_below_threshold():
 
 
 def test_auto_crystallize_does_not_loop():
-    """Nach einem auto-crystallized werden nur NEUE code_executed gezählt."""
+    """After an auto_crystallized event only NEW code_executed events count."""
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
         events = EventLog(events_p)
         ml = MemoryStore(memory_p)
-        # Erste Welle: 25 echos → triggert crystallize
+        # First wave: 25 echoes → triggers crystallize
         for i in range(25):
             events.log("code_executed", iteration=1, lang="shell", ok=True,
                        code_snippet=f"echo {i}")
@@ -87,9 +87,9 @@ def test_auto_crystallize_does_not_loop():
         first = events.last("auto_crystallized")
         assert first is not None
 
-        # Zweiter Aufruf direkt danach OHNE neue code_executed → kein Trigger
+        # Second call directly afterwards WITHOUT new code_executed → no trigger
         _post_run_maintenance(events, ml)
-        # Letzter auto_crystallized hat sich nicht verändert
+        # Last auto_crystallized has not changed
         second = events.last("auto_crystallized")
         assert second["ts"] == first["ts"], f"unexpected re-trigger: {second}"
         print("✓ auto_crystallize_does_not_loop")
@@ -101,14 +101,14 @@ def test_threshold_constant():
 
 
 def test_compress_middle_head_tail_intact():
-    """50 Messages → compress_middle: head 5 + summary + tail 10 = 16 msgs."""
+    """50 messages → compress_middle: head 5 + summary + tail 10 = 16 msgs."""
     import asyncio
     from unittest.mock import patch
     from core import (compress_middle, COMPRESS_HEAD_KEEP, COMPRESS_TAIL_KEEP)
 
     async def go():
         # Build 50 messages
-        msgs = [{"role": "system", "content": "Du bist ein Begleiter."}]
+        msgs = [{"role": "system", "content": "You are a companion."}]
         for i in range(24):
             msgs.append({"role": "user", "content": f"user msg {i}"})
             msgs.append({"role": "assistant", "content": f"assistant msg {i}"})
@@ -116,24 +116,24 @@ def test_compress_middle_head_tail_intact():
         assert len(msgs) == 50
 
         async def fake_call(client, messages):
-            return ("Resolved: alle vorigen Tasks abgeschlossen.\n"
-                    "Pending: nichts mehr offen.\n"
-                    "Decisions: kompakter Stil bestätigt.\n"
-                    "Results: 24 Turns durchlaufen.")
+            return ("Resolved: all prior tasks completed.\n"
+                    "Pending: nothing open.\n"
+                    "Decisions: concise style confirmed.\n"
+                    "Results: 24 turns processed.")
 
         with patch("core.call_model", fake_call):
             result = await compress_middle(None, msgs)
         # head 5 + summary 1 + tail 10
         assert len(result) == COMPRESS_HEAD_KEEP + 1 + COMPRESS_TAIL_KEEP
-        # Head intakt
-        assert result[0]["content"] == "Du bist ein Begleiter."
+        # Head intact
+        assert result[0]["content"] == "You are a companion."
         assert result[COMPRESS_HEAD_KEEP - 1] == msgs[COMPRESS_HEAD_KEEP - 1]
-        # Summary in der Mitte
+        # Summary in the middle
         summary = result[COMPRESS_HEAD_KEEP]
         assert summary["role"] == "system"
         assert "middle-compression" in summary["content"]
         assert "Resolved" in summary["content"]
-        # Tail intakt
+        # Tail intact
         assert result[-1]["content"] == "FINAL user msg"
         assert result[-1]["content"] == msgs[-1]["content"]
     asyncio.run(go())
@@ -141,7 +141,7 @@ def test_compress_middle_head_tail_intact():
 
 
 def test_compress_middle_short_passthrough():
-    """Wenig Messages → keine Compression."""
+    """Few messages → no compression."""
     import asyncio
     from core import compress_middle
     async def go():
@@ -155,7 +155,7 @@ def test_compress_middle_short_passthrough():
 
 
 def test_post_run_conflict_detected():
-    """Schreibe zwei Memories mit Tag-Overlap → memory_conflict_detected event."""
+    """Write two memories with tag overlap → memory_conflict_detected event."""
     import tempfile
     from pathlib import Path
     from events import EventLog
@@ -167,15 +167,15 @@ def test_post_run_conflict_detected():
         events = EventLog(events_p)
         ml = MemoryStore(memory_p)
         # initial: 1 memory
-        m1 = ml.append("semantic", "Acme in Berlin",
-                       tags=["customer", "acme"])
+        ml.append("semantic", "Acme in Berlin",
+                  tags=["customer", "acme"])
         initial_ids = {m["id"] for m in ml.load()}
-        # neue: 1 Memory mit gleichen Tags aber widersprüchlichem content
+        # New: 1 memory with the same tags but conflicting content
         ml.append("semantic", "Acme in Hamburg",
                   tags=["customer", "acme"])
-        # Maintenance ausführen
+        # Run maintenance
         _post_run_maintenance(events, ml, initial_mem_ids=initial_ids)
-        # memory_conflict_detected event geloggt?
+        # memory_conflict_detected event logged?
         conflicts = events.by_type("memory_conflict_detected")
         assert len(conflicts) == 1
         assert "Acme" in conflicts[0].get("new_content", "")

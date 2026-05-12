@@ -1,28 +1,28 @@
 """
-Skill-Kristallisation — extrahiert wiederkehrende Code-Patterns aus
-events.jsonl und schreibt prozedurale Memories.
+Skill crystallization — extract recurring code patterns from events.jsonl
+and persist them as procedural memories.
 
-Hermes-Pattern (XSkill/SkillOS): nach N gleichartigen Tool-Calls wird die
-Operation als wiederverwendbare Prozedur abstrahiert. Hier: nach >= 3
-erfolgreichen Code-Blocks mit gleichem Pattern (lang + first-token).
+Hermes pattern (XSkill/SkillOS): after N similar tool-calls the operation
+is abstracted into a reusable procedure. Here: after >= 3 successful code
+blocks with the same pattern (lang + first token).
 
-Pattern-Beispiele:
+Pattern examples:
   shell:echo, shell:cat, shell:ls, python:import, python:print
 
-Memory-Schema beim Crystallize:
+Memory schema on crystallize:
   {"type":"procedural",
-   "content":"PROCEDURE: <pat> (NxN genutzt). Example:\\n```...```",
+   "content":"PROCEDURE: <pat> (used NxN times). Example:\\n```...```",
    "tags":["crystallized", lang, op]}
 
-Idempotenz: vor Schreiben wird geprüft ob procedural memory mit
-gleichem (crystallized + lang + op)-Tag-Set bereits existiert.
+Idempotency: before writing we check whether a procedural memory with
+the same (crystallized + lang + op) tag-set already exists.
 """
 import re
 import sys
 from collections import Counter
 from pathlib import Path
 
-# Standalone-Ausführung erlauben
+# Allow standalone execution
 sys.path.insert(0, str(Path(__file__).parent))
 
 from events import EventLog
@@ -37,7 +37,7 @@ FIRST_TOKEN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9-]*)")
 
 
 def extract_pattern(lang: str, code_snippet: str) -> str | None:
-    """'lang:firsttoken'. Returns None falls kein Identifier am Anfang."""
+    """'lang:firsttoken'. Returns None when there is no leading identifier."""
     m = FIRST_TOKEN_RE.match(code_snippet or "")
     if not m:
         return None
@@ -47,7 +47,7 @@ def extract_pattern(lang: str, code_snippet: str) -> str | None:
 
 
 def existing_crystallized_patterns(store: MemoryStore) -> set[str]:
-    """Liefert Set von 'lang:op' Patterns die bereits kristallisiert sind."""
+    """Return the set of 'lang:op' patterns that have already been crystallized."""
     result: set[str] = set()
     for m in store.load():
         tags = [t for t in m.get("tags", []) if isinstance(t, str)]
@@ -62,9 +62,9 @@ def existing_crystallized_patterns(store: MemoryStore) -> set[str]:
 def crystallize(events_path: str = EVENT_PATH,
                 memory_path: str = MEMORY_PATH,
                 threshold: int = THRESHOLD) -> list[dict]:
-    """Findet Patterns mit count >= threshold die noch nicht kristallisiert
-    sind. Schreibt eine procedural Memory pro neuem Pattern. Returns Liste
-    der geschriebenen Entries (mit zusätzlichen Feldern pattern + count)."""
+    """Find patterns with count >= threshold that have not been crystallized
+    yet. Write one procedural memory per new pattern. Returns the list of
+    written entries (with extra fields pattern + count)."""
     events = EventLog(events_path)
     store = MemoryStore(memory_path)
 
@@ -78,7 +78,7 @@ def crystallize(events_path: str = EVENT_PATH,
         if not pat:
             continue
         counter[pat] += 1
-        # Behalte das längste/aussagekräftigste Beispiel
+        # Keep the longest / most informative example
         if pat not in examples or len(snippet) > len(examples[pat]):
             examples[pat] = snippet[:200]
 
@@ -90,7 +90,7 @@ def crystallize(events_path: str = EVENT_PATH,
         lang, op = pat.split(":", 1)
         example = examples[pat]
         content = (
-            f"PROCEDURE: {pat} (bereits {count}x genutzt). Example:\n"
+            f"PROCEDURE: {pat} (used {count}x). Example:\n"
             f"```{lang}\n{example}\n```"
         )
         entry = store.append("procedural", content,

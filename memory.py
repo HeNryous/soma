@@ -1,20 +1,20 @@
 """
-MemoryStore — JSONL-persistierte Memories mit drei Typen.
+MemoryStore — JSONL-persisted memories with three types.
 
-Read-Side (Code): load(), by_type(), search(), relevant().
-Write-Side (Modell): append() ist nur für Tests da. The model writes
-selbst via Code-Block (`echo '{...}' >> memories.jsonl`).
+Read side (code): load(), by_type(), search(), relevant().
+Write side (model): append() exists only for tests. The model writes
+itself via a code block (`echo '{...}' >> memories.jsonl`).
 
-Schema pro Zeile:
+Schema per line:
   {"id": "mem_NNNN", "type": "semantic|episodic|procedural",
    "content": "...", "tags": ["..."], "created_at": "...",
    "last_used": "...", "use_count": N}
 
-ID und created_at werden beim load() ergänzt falls nicht vorhanden —
-so kann the model minimal `{"type":"semantic","content":"..."}` schreiben.
+`id` and `created_at` are filled in by load() when missing — so the
+model can write the minimal form `{"type":"semantic","content":"..."}`.
 
-P4 Vergessen: prune() entfernt low-scoring Memories, fuse() merged
-near-duplicates. style memories (Tag preference/style) are immortal.
+P4 forgetting: prune() removes low-scoring memories, fuse() merges
+near-duplicates. Style memories (tag preference/style) are immortal.
 """
 import json
 import math
@@ -32,7 +32,7 @@ class MemoryStore:
 
     def load(self) -> list[dict]:
         """All memories as a normalized list. Defective lines are
-        skipped — the model kann Müll schreiben without killing us."""
+        skipped — the model can write garbage without killing us."""
         if not self.path.exists():
             return []
         items: list[dict] = []
@@ -58,7 +58,7 @@ class MemoryStore:
 
     def append(self, type: str, content: str,
                tags: list[str] | None = None) -> dict:
-        """Append helper for tests. Modell schreibt via shell echo."""
+        """Append helper for tests. The model writes via shell-echo."""
         entry = {
             "type": type if type in VALID_TYPES else "episodic",
             "content": content,
@@ -81,9 +81,9 @@ class MemoryStore:
 
     def find_tag_conflicts(self, new_mem: dict,
                            min_tag_overlap: int = 2) -> list[dict]:
-        """Finds existing memories mit same type + >= min_tag_overlap
+        """Find existing memories with same type + >= min_tag_overlap
         shared tags. Excludes exact content matches (deduplicated by fuse).
-        Used for #12 Pre-Write-Conflict-Detection."""
+        Used for #12 pre-write conflict detection."""
         new_tags = {t.lower() for t in (new_mem.get("tags") or [])
                     if isinstance(t, str)}
         if len(new_tags) < min_tag_overlap:
@@ -103,7 +103,7 @@ class MemoryStore:
         return hits
 
     def conflict_check(self, content: str, threshold: float = 0.8) -> list[dict]:
-        """Naive Near-Duplicate-Check: token-overlap ratio.
+        """Naive near-duplicate check: token-overlap ratio.
         Returns existing memories that look similar to `content`."""
         c_tokens = set(content.lower().split())
         if not c_tokens:
@@ -127,8 +127,8 @@ class MemoryStore:
         tmp.replace(self.path)
 
     def mark_used(self, id: str) -> bool:
-        """Increments use_count, sets last_used to now.
-        Atomic rewrite. Returns True wenn ID gefunden."""
+        """Increment use_count, set last_used to now.
+        Atomic rewrite. Returns True when ID was found."""
         mems = self.load()
         now = datetime.now().isoformat(timespec="seconds")
         found = False
@@ -142,14 +142,14 @@ class MemoryStore:
         return found
 
     def prune(self, keep: int = 100) -> int:
-        """Keeps the top-N memories nach score(). Returns count removed.
-        style memories (score=inf) always remain, even if keep is exceeded."""
+        """Keep the top-N memories by score(). Returns count removed.
+        Style memories (score=inf) always remain, even if `keep` is exceeded."""
         mems = self.load()
         if len(mems) <= keep:
             return 0
         now = datetime.now()
         scored = sorted(mems, key=lambda m: score(m, now), reverse=True)
-        # First all inf-score (style memories), then fill up to keep
+        # First all inf-score (style memories), then fill up to `keep`
         immortal = [m for m in scored if score(m, now) == float("inf")]
         mortal = [m for m in scored if score(m, now) != float("inf")]
         kept = immortal + mortal[:max(0, keep - len(immortal))]
@@ -160,9 +160,9 @@ class MemoryStore:
         return removed
 
     def fuse(self, threshold: float = 0.85) -> int:
-        """Merges near-duplicates: same type + style status, content-overlap
-        ≥ threshold. On merge: sum use_count, unify tags, max
-        created_at. Returns count removeder (gemergeter) Entries."""
+        """Merge near-duplicates: same type + style status, content-overlap
+        >= threshold. On merge: sum use_count, unify tags, take the later
+        created_at. Returns the count of merged entries."""
         mems = self.load()
         if len(mems) < 2:
             return 0
@@ -181,7 +181,7 @@ class MemoryStore:
                     continue
                 tags_i = {t.lower() for t in mems[i].get("tags", [])}
                 tags_j = {t.lower() for t in mems[j].get("tags", [])}
-                # style memories nur mit anderen style memories mergen
+                # Only merge style memories with other style memories
                 if bool(tags_i & STYLE_TAGS) != bool(tags_j & STYLE_TAGS):
                     continue
                 overlap = len(t_i & t_j) / max(len(t_i), len(t_j))
@@ -204,7 +204,7 @@ class MemoryStore:
 
 def score(m: dict, now: datetime | None = None) -> float:
     """Score function: recency × (1 + frequency) × type-weight.
-    Immortal memories (Tags in IMMORTAL_TAGS — preference/style/tone/
+    Immortal memories (tags in IMMORTAL_TAGS — preference/style/tone/
     behavior + domain/role/identity) → inf (immune to prune)."""
     tags = {t.lower() for t in m.get("tags", [])}
     if tags & IMMORTAL_TAGS:
@@ -223,27 +223,27 @@ def score(m: dict, now: datetime | None = None) -> float:
     return recency * (1.0 + frequency) * type_weight
 
 
-STYLE_TAGS = {"preference", "style", "behavior", "stil", "ton"}
+STYLE_TAGS = {"preference", "style", "behavior", "tone"}
 
-# Unsterbliche Tags: score=inf, überleben jedes Prune.
-# Superset von STYLE_TAGS. STYLE_TAGS bleibt das engere Set für die
-# „Behavior Rules"-Render-Logik. Hier kommen Grundwissens-Tags dazu:
-#   - domain: Fachbegriffe, Branchen-Regeln, Domain-Definitionen
-#   - role: Identität + Arbeitskontext
-#   - identity: persönliche Fakten über den User
-# Diese werden selten abgerufen, sind aber immer relevant.
+# Immortal tags: score=inf, survive every prune.
+# Superset of STYLE_TAGS. STYLE_TAGS remains the narrower set used by the
+# "Behavior Rules" render logic. Beyond style we treat as immortal:
+#   - domain: domain vocabulary, industry rules, definitions
+#   - role: identity + work context
+#   - identity: personal facts about the user
+# These are queried rarely but always relevant.
 IMMORTAL_TAGS = STYLE_TAGS | {"domain", "role", "identity"}
 
 
 def behavior_memories(memories: list[dict]) -> list[dict]:
-    """Returns only memories with style / behavior tags."""
+    """Return only memories with style / behavior tags."""
     return [m for m in memories
             if {t.lower() for t in m.get("tags", [])} & STYLE_TAGS]
 
 
 def render_behaviors(memories: list[dict]) -> str:
-    """Render style memories as compact reminder message.
-    For injection directly before the user message (Recency-Bias)."""
+    """Render style memories as a compact reminder message.
+    Injected directly before the user message (recency bias)."""
     bms = behavior_memories(memories)
     if not bms:
         return ""
@@ -256,8 +256,8 @@ def render_behaviors(memories: list[dict]) -> str:
 def format_for_prompt(memories: list[dict], max_chars: int = 4000) -> str:
     """Render memories as a prompt block. Memories with style tags
     (preference/style/behavior) get their own priority block
-    'Behavior Rules'. Plain facts next. Learned procedures und
-    Episoden zuletzt."""
+    'Behavior Rules'. Plain facts next. Learned procedures and
+    episodes last."""
     if not memories:
         return ""
     behaviors: list[dict] = []
@@ -278,8 +278,8 @@ def format_for_prompt(memories: list[dict], max_chars: int = 4000) -> str:
     parts: list[str] = []
     if behaviors:
         parts.append(
-            "Behavior Rules (befolge sie bei JEDER Antwort, "
-            "highest priority — sie überschreiben deine Defaults):"
+            "Behavior Rules (follow on EVERY reply, highest priority — "
+            "they override your defaults):"
         )
         for m in behaviors:
             parts.append(f"- {m['content']}")
@@ -301,12 +301,12 @@ def format_for_prompt(memories: list[dict], max_chars: int = 4000) -> str:
 
     text = "\n".join(parts).rstrip()
     if len(text) > max_chars:
-        text = text[:max_chars] + "\n…[gekürzt]"
+        text = text[:max_chars] + "\n…[truncated]"
     return text
 
 
 def read_context_selection(workspace_path) -> list[str]:
-    """Reads <workspace>/context_selection.json — Array of memory IDs.
+    """Read <workspace>/context_selection.json — array of memory IDs.
     Missing/empty/malformed → []. Read side for the foreground."""
     p = Path(workspace_path) / "context_selection.json"
     if not p.exists():
@@ -325,10 +325,10 @@ def format_for_prompt_selected(memories: list[dict],
                                 user_query: str,
                                 max_chars: int = 4000) -> str:
     """Selection-driven rendering:
-      1) Behavior Rules (style tags, immer prominent)
+      1) Behavior Rules (style tags, always prominent)
       2) Relevant context (curator-selected IDs, excluding style tags)
       3) Further memories (tag match to user query, excluding selected and style)
-    If selected_ids empty: falls back to format_for_prompt (Fallback)."""
+    If selected_ids is empty: falls back to format_for_prompt."""
     if not memories or not selected_ids:
         return format_for_prompt(memories, max_chars)
     behaviors: list[dict] = []
@@ -354,23 +354,23 @@ def format_for_prompt_selected(memories: list[dict],
     parts: list[str] = []
     if behaviors:
         lines = [
-            "Behavior Rules (befolge sie bei JEDER Antwort, höchste "
-            "Priorität — sie überschreiben deine Defaults):"
+            "Behavior Rules (follow on EVERY reply, highest priority — "
+            "they override your defaults):"
         ]
         for m in behaviors:
             lines.append(f"- {m['content']}")
         parts.append("\n".join(lines))
     if selected:
-        lines = ["Relevant context (für diesen Turn ausgewählt):"]
+        lines = ["Relevant context (selected for this turn):"]
         for m in selected:
             lines.append(f"- {m['content']}")
         parts.append("\n".join(lines))
     if further:
-        lines = ["Further memories (Tag-Match zur Frage):"]
+        lines = ["Further memories (tag match to the query):"]
         for m in further:
             lines.append(f"- {m['content']}")
         parts.append("\n".join(lines))
     text = "\n\n".join(parts)
     if len(text) > max_chars:
-        text = text[:max_chars] + "\n…[gekürzt]"
+        text = text[:max_chars] + "\n…[truncated]"
     return text

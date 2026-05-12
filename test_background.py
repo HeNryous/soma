@@ -1,9 +1,9 @@
-"""Smoke test for background.py — Threshold + Queue ohne model call."""
+"""Smoke test for background.py — threshold + queue without a model call."""
 import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from background import (Background, should_curate,
                         CURATION_MIN_USER_CHARS,
@@ -15,7 +15,7 @@ from memory import MemoryStore
 
 def test_should_curate_short_skip():
     assert should_curate("ok", 0) is False
-    assert should_curate("kurzer text", 0) is False
+    assert should_curate("short text", 0) is False
     assert should_curate("a" * (CURATION_MIN_USER_CHARS - 1), 0) is False
     print("✓ should_curate_short_skip")
 
@@ -27,22 +27,22 @@ def test_should_curate_substantive():
 
 
 def test_should_curate_fresh_delta_short_skips():
-    """Wenn foreground schon was geschrieben hat + Message kurz: skip."""
-    msg = "a" * (CURATION_MIN_USER_CHARS + 10)  # >threshold aber < 400
+    """If the foreground already wrote something + message is short: skip."""
+    msg = "a" * (CURATION_MIN_USER_CHARS + 10)  # > threshold but < 400
     assert should_curate(msg, 1) is False
     print("✓ should_curate_fresh_delta_short_skips")
 
 
 def test_should_curate_long_message_even_with_delta():
-    """Lange Messages → curaten auch wenn delta>0 (foreground war
-    vermutlich nur partial)."""
+    """Long messages → curate even with delta>0 (foreground was
+    presumably only partial)."""
     long_msg = "a" * (CURATION_SKIP_IF_FRESH_DELTA_AND_SHORT + 10)
     assert should_curate(long_msg, 2) is True
     print("✓ should_curate_long_message_even_with_delta")
 
 
 def test_background_queue_processes_turn():
-    """Queue → Background extrahiert Code-Blöcke und führt aus."""
+    """Queue → background extracts code blocks and executes them."""
     async def go():
         with tempfile.TemporaryDirectory() as td:
             mem_path = Path(td) / "m.jsonl"
@@ -51,7 +51,7 @@ def test_background_queue_processes_turn():
             bg = Background(queue,
                             memory_path=str(mem_path),
                             event_path=str(ev_path))
-            # Mock call_model: returns shell-block, execute: writes memory
+            # Mock call_model: returns shell block; execute writes memory
             fake_response = (
                 "```shell\n"
                 "echo '{\"type\":\"semantic\",\"content\":\"Test\","
@@ -62,7 +62,7 @@ def test_background_queue_processes_turn():
                 return fake_response
 
             async def fake_exec(lang, code):
-                # Simuliere: schreibe direkt in mem-file
+                # Simulate: write directly to mem file
                 mem_path.write_text(
                     '{"type":"semantic","content":"Test","tags":["fact"]}\n')
                 return {"ok": True, "out": "", "err": ""}
@@ -77,7 +77,7 @@ def test_background_queue_processes_turn():
                     "blocks_executed": 0,
                     "memory_delta": 0,
                 })
-                # Warte bis Queue leer
+                # Wait until queue is empty
                 await queue.join()
                 bg_task.cancel()
                 try:
@@ -85,17 +85,17 @@ def test_background_queue_processes_turn():
                 except asyncio.CancelledError:
                     pass
 
-            # Memory wurde geschrieben
+            # Memory was written
             assert mem_path.exists()
             assert "Test" in mem_path.read_text()
-            # Event geloggt
+            # Event logged
             assert "background_curated" in ev_path.read_text()
         print("✓ background_queue_processes_turn")
     asyncio.run(go())
 
 
 def test_background_skips_trivial():
-    """Trivial-Message (kurze msg, kein delta) → kein Curation-Call."""
+    """Trivial message (short msg, no delta) → no curation call."""
     async def go():
         with tempfile.TemporaryDirectory() as td:
             mem_path = Path(td) / "m.jsonl"
@@ -140,8 +140,6 @@ def test_find_recent_failed_exec():
         assert last_fail is not None
         assert last_fail["code_snippet"] == "bad command"
         # since_ts cuts off
-        all_evs = ev.load()
-        last_ts = all_evs[-1]["ts"]
         # Use a ts AFTER all events
         future = "9999"
         assert find_recent_failed_exec(ev, future) is None
@@ -160,7 +158,7 @@ def test_browse_thresholds_constants():
 
 
 def test_maybe_browse_skips_when_low_state():
-    """Default state — kein browse."""
+    """Default state — no browse."""
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
@@ -183,7 +181,7 @@ def test_maybe_browse_skips_when_low_state():
 
 
 def test_maybe_browse_rate_limited():
-    """Hour-Budget aufgebraucht → kein call trotz hoher state."""
+    """Hourly budget exhausted → no call despite high state."""
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
@@ -217,34 +215,32 @@ def test_maybe_browse_rate_limited():
 
 def test_parse_id_array():
     from background import _parse_id_array
-    # Reines JSON
+    # Pure JSON
     assert _parse_id_array('["mem_0001","mem_0007"]') == ["mem_0001", "mem_0007"]
-    # Markdown-Fence
+    # Markdown fence
     assert _parse_id_array('```json\n["mem_0001"]\n```') == ["mem_0001"]
-    # Erklärungstext drumherum
+    # Explanation text around it
     assert _parse_id_array(
-        'Hier ist meine Wahl: ["mem_0042", "mem_0009"] passt am besten.'
+        'Here is my pick: ["mem_0042", "mem_0009"] fits best.'
     ) == ["mem_0042", "mem_0009"]
     # Garbage
-    assert _parse_id_array("nichts hier") == []
+    assert _parse_id_array("nothing here") == []
     assert _parse_id_array("") == []
-    # Non-list-Array
+    # Non-list-array
     assert _parse_id_array('{"foo": [1, 2]}') == []
     print("✓ parse_id_array")
 
 
 def test_curate_selection_skips_under_threshold():
-    """Bei < SELECTION_MIN_TOTAL Memories soll der Curator KEINEN
-    Selection-Call machen (kein File, kein model call)."""
-    import asyncio
-    from unittest.mock import patch
+    """With fewer than SELECTION_MIN_TOTAL memories the curator must NOT
+    make a selection call (no file, no model call)."""
     from background import SELECTION_MIN_TOTAL
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
         state_p = Path(td) / "state.json"
         ml = MemoryStore(memory_p)
-        # Weniger als SELECTION_MIN_TOTAL
+        # Fewer than SELECTION_MIN_TOTAL
         for i in range(SELECTION_MIN_TOTAL - 5):
             ml.append("semantic", f"fact {i}", tags=["random"])
         queue: asyncio.Queue = asyncio.Queue()
@@ -269,10 +265,8 @@ def test_curate_selection_skips_under_threshold():
 
 
 def test_curate_selection_writes_file():
-    """Mit genug Memories + valider Model-Antwort → context_selection.json
-    wird geschrieben mit gefilterten IDs."""
-    import asyncio
-    from unittest.mock import patch
+    """With enough memories + valid model answer → context_selection.json
+    is written with filtered IDs."""
     from background import SELECTION_MIN_TOTAL
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
@@ -298,7 +292,7 @@ def test_curate_selection_writes_file():
         assert Path(bg_mod.SELECTION_PATH).exists()
         import json as _j
         ids = _j.loads(Path(bg_mod.SELECTION_PATH).read_text())
-        # mem_9999 muss gefiltert sein (existiert nicht)
+        # mem_9999 must be filtered out (does not exist)
         assert ids == ["mem_0001", "mem_0003"]
     print("✓ curate_selection_writes_file")
 

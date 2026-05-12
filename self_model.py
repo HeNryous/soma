@@ -1,11 +1,11 @@
 """
-Self-Model — leichte Self-Awareness-Schicht.
+Self-model — lightweight self-awareness layer.
 
-Aggregiert State aus MemoryStore + EventLog zu zwei Views:
-- `summarize()` → 1-2-Satz-Block für System-Prompt (Modell-Sicht)
-- `describe()` → menschenlesbare CLI-Übersicht (User-Sicht via status.py)
+Aggregates state from MemoryStore + EventLog into two views:
+- `summarize()` → 1-2 sentence block for the system prompt (model's view)
+- `describe()` → human-readable CLI overview (user's view, via status.py)
 
-Keine eigene Datei. Nur Read-Only-Derivation aus existierenden Stores.
+No own file. Read-only derivation from existing stores.
 """
 from datetime import datetime
 
@@ -21,12 +21,12 @@ def _format_skill_list(skills: list[str], max_n: int = 5) -> str:
     if not skills:
         return ""
     head = skills[:max_n]
-    suffix = f" (+{len(skills) - max_n} weitere)" if len(skills) > max_n else ""
+    suffix = f" (+{len(skills) - max_n} more)" if len(skills) > max_n else ""
     return ", ".join(head) + suffix
 
 
 def derive(store: MemoryStore, events: EventLog) -> dict:
-    """Rohe Zahlen aus Store + Event-Log."""
+    """Raw numbers from store + event log."""
     mems = store.load()
     counts = {"semantic": 0, "procedural": 0, "episodic": 0}
     skills: list[str] = []
@@ -65,29 +65,29 @@ def derive(store: MemoryStore, events: EventLog) -> dict:
 
 
 def summarize(store: MemoryStore, events: EventLog) -> str:
-    """1-2-Satz-Self-Awareness-Block für den System-Prompt."""
+    """1-2 sentence self-awareness block for the system prompt."""
     d = derive(store, events)
     parts: list[str] = []
     if d["total_memories"]:
         c = d["memory_counts"]
         parts.append(
-            f"Was du weißt: {d['total_memories']} Memories "
-            f"({c['semantic']} Fakten, {c['procedural']} Prozeduren, "
-            f"{c['episodic']} Episoden)."
+            f"What you know: {d['total_memories']} memories "
+            f"({c['semantic']} facts, {c['procedural']} procedures, "
+            f"{c['episodic']} episodes)."
         )
     else:
-        parts.append("Du hast noch keine Memories.")
+        parts.append("You have no memories yet.")
     if d["skills"]:
         parts.append(
-            f"Du kennst die Skills: {_format_skill_list(d['skills'])}."
+            f"You know these skills: {_format_skill_list(d['skills'])}."
         )
     if d["prompts_today"] >= 2:
-        parts.append(f"Heute gab es schon {d['prompts_today']} Gespräche.")
+        parts.append(f"There have been {d['prompts_today']} conversations today.")
     return " ".join(parts)
 
 
 def describe(store: MemoryStore, events: EventLog) -> str:
-    """Menschenlesbare Übersicht für CLI."""
+    """Human-readable overview for the CLI."""
     d = derive(store, events)
     c = d["memory_counts"]
     lines = ["=== HARNESS STATUS ==="]

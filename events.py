@@ -1,13 +1,13 @@
 """
-EventLog — Append-Only JSONL Audit Trail (P9).
+EventLog — append-only JSONL audit trail (P9).
 
-Jede relevante Handlung wird als JSON-Zeile mit Timestamp geloggt.
-State der Welt ist aus dem Log rekonstruierbar.
+Every relevant action is logged as a JSON line with a timestamp.
+The state of the world can be reconstructed from this log.
 
-Schema pro Zeile:
+Schema per line:
   {"ts": "ISO-8601", "type": "name", ...payload-keys}
 
-Event-Typen die `core.run()` schreibt:
+Event types written by `core.run()`:
 - prompt_received   {"user_message": ...}
 - correction        {"trigger": "...", "last_response": "..."}
 - model_call        {"iteration": N, "blocks": M, "chars": K}
@@ -65,9 +65,9 @@ class EventLog:
         return [e for e in self.load() if e.get("ts", "") >= iso_timestamp]
 
     def recent_turns(self, n: int = 3) -> list[dict]:
-        """Liefert die letzten N (user, assistant)-Paare als Dicts.
-        Paart prompt_received-Event mit dem nächsten response_sent-Event.
-        Verwaiste prompts (kein response davor) werden ignoriert."""
+        """Return the last N (user, assistant) pairs as dicts.
+        Pairs a prompt_received event with the next response_sent event.
+        Orphan prompts (no matching response) are ignored."""
         pairs: list[dict] = []
         current_prompt: dict | None = None
         for ev in self.load():
@@ -85,12 +85,12 @@ class EventLog:
 
 
 def render_recent_turns(pairs: list[dict], max_chars: int = 200) -> str:
-    """Render Turn-Paare als kompakter System-Block für Conversation Continuity."""
+    """Render turn pairs as a compact system block for conversation continuity."""
     if not pairs:
         return ""
     lines = [
-        "Recent conversations (du erinnerst dich an diesen Verlauf — "
-        "nutze ihn wenn relevant):"
+        "Recent conversations (you remember this history — "
+        "use it when relevant):"
     ]
     for p in pairs:
         u = (p.get("user") or "")[:max_chars]
@@ -99,30 +99,43 @@ def render_recent_turns(pairs: list[dict], max_chars: int = 200) -> str:
             u += "…"
         if len(p.get("assistant") or "") > max_chars:
             a += "…"
-        lines.append(f"[Du sagtest]: {u}")
-        lines.append(f"[Ich antwortete]: {a}")
+        lines.append(f"[User said]: {u}")
+        lines.append(f"[I replied]: {a}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
 
-# --- Korrektur-Detektion (P6 Closed-Loop) ---
+# --- Correction detection (P6 closed-loop) ---
 
+import re as _re
+
+# Matched with word boundaries to avoid false positives (e.g. "no" must
+# not fire inside "node" / "nochmal"). For German triggers we keep the
+# substring path because some phrases contain spaces ("stimmt nicht").
 CORRECTION_PATTERNS = (
+    "no", "not", "wrong", "shorter", "different", "actually",
+    "doesn't fit", "again", "too long", "too short", "too much",
+    "not like that", "do it differently",
+    # German triggers — user may write in German
     "nein", "kürzer", "knapper", "anders", "falsch", "stimmt nicht",
     "passt nicht", "nochmal", "zu lang", "zu kurz", "zu viel",
-    "nicht so", "anders machen",
+)
+
+_CORRECTION_REGEXES = tuple(
+    (kw, _re.compile(r"\b" + _re.escape(kw) + r"\b", _re.IGNORECASE))
+    for kw in CORRECTION_PATTERNS
 )
 
 
 def detect_correction(user_message: str) -> str | None:
-    """Liefert den Trigger-String falls die Message wie eine Korrektur
-    der letzten Antwort aussieht — sonst None. Heuristik, keine NLP."""
+    """Return the trigger string when the message looks like a correction of
+    the previous reply — otherwise None. Heuristic, not NLP."""
     msg = user_message.lower().strip()
-    # Korrekturen sind meistens kurz. Längere Sätze nicht als Korrektur werten.
+    # Corrections are usually short. Skip long sentences.
     if len(msg) > 100:
         return None
-    for kw in CORRECTION_PATTERNS:
-        if kw in msg:
+    for kw, rx in _CORRECTION_REGEXES:
+        if rx.search(msg):
             return kw
     return None
 
@@ -130,23 +143,28 @@ def detect_correction(user_message: str) -> str | None:
 def build_correction_note(last_response_event: dict | None,
                           trigger: str,
                           user_message: str) -> str:
-    """Render das Korrektur-Signal als System-Message-Inhalt."""
+    """Render the correction signal as a system-message body."""
     if not last_response_event:
         return ""
     last_text = (last_response_event.get("final_text") or "")[:500]
     return (
-        "CORRECTION-SIGNAL: Der User hat mit \""
-        f"{user_message}\" auf deine letzte Antwort reagiert.\n"
-        f"Letzte Antwort war:\n---\n{last_text}\n---\n"
-        f"Passe deine nächste Antwort an. Wenn der Hinweis eine "
-        "dauerhafte Präferenz ist (Stil, Länge, Sprache), schreibe "
-        "eine episodische oder semantische Memory über shell-Block."
+        "CORRECTION-SIGNAL: the user reacted with \""
+        f"{user_message}\" to your previous reply.\n"
+        f"Previous reply was:\n---\n{last_text}\n---\n"
+        f"Adapt your next reply. If the hint is a lasting preference "
+        f"(style, length, language), persist it as an episodic or "
+        f"semantic memory via a shell block."
     )
 
 
-# --- Broken-Promise-Detection (Anti-Halluzination) ---
+# --- Broken-promise detection (anti-hallucination) ---
 
 MEMORY_PROMISE_PATTERNS = (
+    # English filler phrases
+    "noted", "i'll note", "i will note", "i'll remember",
+    "i will remember", "remembered", "saving that", "saved that",
+    "i'll save", "i will save", "writing that down", "wrote that down",
+    # German filler phrases (model may answer in German)
     "gemerkt", "ich merke", "ich merk ", "ich werde mir merken",
     "ich speicher", "gespeichert", "speichere das",
     "ich notier", "notiert",
@@ -157,9 +175,9 @@ MEMORY_PROMISE_PATTERNS = (
 
 
 def detect_memory_promise(text: str) -> str | None:
-    """Returns matched phrase wenn der Text ein Memory-Write-Versprechen
-    macht (Floskel-Erkennung). Wenn the model so was sagt aber kein
-    code-block ausgeführt wurde → Halluzinations-Signal."""
+    """Return the matched phrase when the text contains a memory-write
+    promise (filler-phrase detector). If the model says such a thing
+    without running a code block → hallucination signal."""
     msg = (text or "").lower()
     for pat in MEMORY_PROMISE_PATTERNS:
         if pat in msg:
@@ -168,8 +186,8 @@ def detect_memory_promise(text: str) -> str | None:
 
 
 def build_broken_promise_note(last_response_event: dict | None) -> str:
-    """Wenn die letzte Antwort 'gemerkt'/'notiert' sagte aber kein
-    Memory-Write passierte → Reminder für die aktuelle Iteration."""
+    """If the last reply said 'noted' / 'gemerkt' but no memory write
+    happened → reminder injected into the current iteration."""
     if not last_response_event:
         return ""
     if last_response_event.get("blocks_executed", 0) != 0:
@@ -179,10 +197,10 @@ def build_broken_promise_note(last_response_event: dict | None) -> str:
     if not phrase:
         return ""
     return (
-        f"BROKEN-PROMISE: In deiner letzten Antwort sagtest du „{phrase}…" + "\""
-        f" — aber du hast KEINE Memory geschrieben.\n"
-        f"Letzte Antwort:\n---\n{last_text[:400]}\n---\n"
-        f"Schau dir die aktuelle User-Message UND die letzten Gespräche an, "
-        f"extrahiere die zu merkenden Fakten und schreibe JETZT die JSONL-"
-        f"Zeile(n) als shell-echo. KEINE Floskel ohne Write."
+        f"BROKEN-PROMISE: in your previous reply you said \"{phrase}…\""
+        f" — but you wrote NO memory.\n"
+        f"Previous reply:\n---\n{last_text[:400]}\n---\n"
+        f"Look at the current user message AND the recent conversations, "
+        f"extract the facts worth remembering and write the JSONL "
+        f"line(s) NOW via shell-echo. NO filler phrase without a write."
     )

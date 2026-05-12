@@ -1,11 +1,11 @@
-"""Minimaler .env-Parser. Eigener Parser statt python-dotenv (P1)."""
+"""Minimal .env parser. Custom parser instead of python-dotenv (P1)."""
 import os
 from pathlib import Path
 
 
 def load_env(path: str | Path = ".env") -> dict[str, str]:
-    """Parst KEY=VALUE pro Zeile, ignoriert Kommentare und leere Zeilen.
-    Setzt die Werte in os.environ. Returns das geparste Dict."""
+    """Parse KEY=VALUE per line, ignore comments and blank lines.
+    Sets each value into os.environ. Returns the parsed dict."""
     p = Path(path)
     result: dict[str, str] = {}
     if not p.exists():
@@ -20,7 +20,7 @@ def load_env(path: str | Path = ".env") -> dict[str, str]:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         result[key] = value
-        # .env hat Vorrang vor bereits gesetzten OS-Env-Vars
-        # (übliche Konvention bei direnv/dotenv-Tools)
+        # .env takes precedence over already-set OS env vars
+        # (common convention with direnv / dotenv tools)
         os.environ[key] = value
     return result

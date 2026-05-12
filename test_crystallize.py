@@ -15,7 +15,7 @@ def test_extract_pattern():
     assert extract_pattern("python", "import os") == "python:import"
     assert extract_pattern("shell", "") is None
     assert extract_pattern("shell", "   ") is None
-    # Code beginnend mit Sonderzeichen → kein Identifier
+    # Code starting with a special character → no identifier
     assert extract_pattern("python", "@decorator") is None
     print("✓ extract_pattern")
 
@@ -25,15 +25,15 @@ def test_crystallize_basic():
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"
         log = EventLog(events_p)
-        # 3 erfolgreiche echo (über threshold)
+        # 3 successful echoes (above threshold)
         for i in range(3):
             log.log("code_executed", iteration=1, lang="shell", ok=True,
                     code_snippet=f"echo 'test {i}' > /workspace/test{i}.txt")
-        # 2 erfolgreiche cat (unter threshold)
+        # 2 successful cats (below threshold)
         for i in range(2):
             log.log("code_executed", iteration=1, lang="shell", ok=True,
                     code_snippet=f"cat /workspace/test{i}.txt")
-        # 1 echo MIT Fehler → darf NICHT zählen
+        # 1 echo WITH error → must NOT count
         log.log("code_executed", iteration=1, lang="shell", ok=False,
                 code_snippet="echo bad > /readonly")
 
@@ -74,16 +74,16 @@ def test_existing_patterns_lookup():
         store = MemoryStore(memory_p)
         store.append("procedural", "PROCEDURE: shell:echo …",
                      tags=["crystallized", "shell", "echo"])
-        store.append("semantic", "ein Fakt", tags=["random"])
-        store.append("procedural", "manuell geschrieben",
-                     tags=["procedure"])  # KEIN crystallized-Tag
+        store.append("semantic", "a fact", tags=["random"])
+        store.append("procedural", "manually written",
+                     tags=["procedure"])  # NO crystallized tag
         patterns = existing_crystallized_patterns(store)
         assert patterns == {"shell:echo"}
         print("✓ existing_patterns_lookup")
 
 
 def test_crystallize_python_pattern():
-    """Mehrere Sprachen, mehrere Patterns parallel."""
+    """Multiple languages, multiple patterns side by side."""
     with tempfile.TemporaryDirectory() as td:
         events_p = Path(td) / "events.jsonl"
         memory_p = Path(td) / "memory.jsonl"

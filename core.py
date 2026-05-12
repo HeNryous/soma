@@ -29,8 +29,8 @@ from self_model import summarize as self_summarize
 import os as _os
 from pathlib import Path as _Path
 
-# Auto-load .env adjacent to this module damit CLI, status.py und tests
-# dieselben Env-Vars sehen wie der Telegram-Bot.
+# Auto-load .env next to this module so CLI, status.py and tests see
+# the same env vars as the Telegram bot.
 try:
     from envfile import load_env as _load_env
     _env_path = _Path(__file__).parent / ".env"
@@ -48,8 +48,8 @@ MODEL = _os.environ.get("VLLM_MODEL", "your-model-name")
 CONTAINER = _os.environ.get("SOMA_CONTAINER", "soma-sandbox")
 _SOMA_ROOT = _os.environ.get("SOMA_ROOT",
                               _os.path.dirname(_os.path.abspath(__file__)))
-# Runtime-Daten liegen unter SOMA_DATA (Default: <repo>/data/) damit
-# der Repo-Checkout selbst nur Code enthält, kein State.
+# Runtime data lives under SOMA_DATA (default: <repo>/data/) so the
+# repo checkout itself only contains code, no state.
 _SOMA_DATA = _os.environ.get("SOMA_DATA",
                               _os.path.join(_SOMA_ROOT, "data"))
 MEMORY_PATH = _os.path.join(_SOMA_DATA, "workspace", "memories.jsonl")
@@ -64,8 +64,8 @@ COMPRESS_THRESHOLD_MESSAGES = 40
 COMPRESS_THRESHOLD_CHARS = 200_000
 COMPRESS_HEAD_KEEP = 5      # system + first 2 user/assistant pairs
 COMPRESS_TAIL_KEEP = 10
-COMPRESS_TOOL_SHORTEN = 500  # tool-result chars > N → 1-Zeilen-Summary
-COMPRESS_COOLDOWN_ITERS = 10  # frühestens nach N weiteren iters wieder
+COMPRESS_TOOL_SHORTEN = 500  # tool-result chars > N → 1-line summary
+COMPRESS_COOLDOWN_ITERS = 10  # earliest re-trigger after N more iters
 
 # #12 Conflict-Detection
 CONFLICT_MIN_TAG_OVERLAP = 2
@@ -247,8 +247,8 @@ def _shorten_tool_result(content: str) -> str:
 
 
 def _looks_like_tool_result(msg: dict) -> bool:
-    """Heuristik: user-message mit '[CODE-RESULT' prefix ist ein Tool-Result
-    aus unserer Pipeline."""
+    """Heuristic: a user message with the '[CODE-RESULT' prefix is a
+    tool result from our pipeline."""
     if msg.get("role") != "user":
         return False
     c = msg.get("content") or ""
@@ -257,13 +257,13 @@ def _looks_like_tool_result(msg: dict) -> bool:
 
 async def compress_middle(client: httpx.AsyncClient,
                           messages: list[dict]) -> list[dict]:
-    """Head-Middle-Tail Compression. Returns neue Message-Liste.
+    """Head-Middle-Tail compression. Returns a new message list.
 
-    Strategie:
-    - Head (erste COMPRESS_HEAD_KEEP) bleibt intakt.
-    - Tail (letzte COMPRESS_TAIL_KEEP) bleibt intakt.
+    Strategy:
+    - Head (first COMPRESS_HEAD_KEEP) is kept intact.
+    - Tail (last COMPRESS_TAIL_KEEP) is kept intact.
     - Middle: all tool-results > COMPRESS_TOOL_SHORTEN get shortened;
-      then the entire middle is compressed into ONE system-summary.
+      then the entire middle is compressed into ONE system summary.
     """
     if len(messages) <= COMPRESS_HEAD_KEEP + COMPRESS_TAIL_KEEP + 2:
         return messages
@@ -332,22 +332,22 @@ def format_result(idx: int, total: int, lang: str, result: dict) -> str:
 
 async def run(user_message: str) -> dict:
     """
-    Führt einen Agentic-Run gegen vLLM aus. Returns Statistiken
-    inkl. final_text, iterations, blocks_executed.
+    Run one agentic loop against vLLM. Returns statistics including
+    final_text, iterations and blocks_executed.
     """
     log = logging.getLogger("soma")
     store = MemoryStore(MEMORY_PATH)
     events = EventLog(EVENT_PATH)
-    # Auto-prune wenn Memory-Count > 200 → behalte 100 + alle style memories
+    # Auto-prune when memory count > 200 → keep 100 + all style memories
     initial = store.load()
     if len(initial) > 200:
         removed = store.prune(keep=100)
         events.log("memory_pruned", removed=removed,
                    kept_after=len(store.load()))
         log.info("auto-prune: removed %d memories", removed)
-    # Memory-Block bauen: wenn Curator eine Selection geschrieben hat UND
-    # genug Memories da sind → split-Layout (relevanter Kontext + weitere).
-    # Sonst Fallback: alle Memories grouped by type.
+    # Build the memory block: if the curator wrote a selection AND
+    # there are enough memories → split layout (relevant context + further).
+    # Otherwise fall back to all memories grouped by type.
     workspace_dir = _Path(MEMORY_PATH).parent
     all_mems_for_prompt = store.load()
     selection_ids = read_context_selection(workspace_dir)
@@ -361,24 +361,24 @@ async def run(user_message: str) -> dict:
         log.info("loaded %d memories (fallback render)",
                  len(all_mems_for_prompt))
 
-    # Conversation history VOR dem Loggen des aktuellen Prompts lesen.
+    # Read conversation history BEFORE logging the current prompt.
     recent_pairs = events.recent_turns(n=3)
-    # #12 Pre-existing Conflicts: alles seit letztem prompt_received
+    # #12 pre-existing conflicts: everything since the last prompt_received
     last_prompt = events.last("prompt_received")
     last_prompt_ts = (last_prompt or {}).get("ts", "")
     pending_conflicts = [
         e for e in events.by_type("memory_conflict_detected")
         if e.get("ts", "") > last_prompt_ts
     ]
-    # Snapshot Memory-IDs für conflict detection NACH run()
+    # Snapshot memory IDs for conflict detection AFTER run()
     initial_mem_ids = {m.get("id") for m in store.load()}
 
     events.log("prompt_received", user_message=user_message)
 
-    # Broken-Promise-Detection: hat letzte Antwort "gemerkt" gesagt
-    # OHNE Memory zu schreiben? Dann (a) Reminder injizieren UND (b) die
-    # auslösende User-Message deterministisch als Memory persistieren —
-    # Model has proven 3x that it lies instead of writing.
+    # Broken-promise detection: did the last reply say "noted" / "gemerkt"
+    # WITHOUT writing a memory? If so (a) inject a reminder AND (b)
+    # deterministically persist the triggering user message as a memory —
+    # the model has proven 3x that it lies instead of writing.
     last_resp_for_promise = events.last("response_sent")
     broken_promise_note = build_broken_promise_note(last_resp_for_promise)
     if broken_promise_note:
@@ -389,10 +389,10 @@ async def run(user_message: str) -> dict:
                    prior_response=(last_resp_for_promise or {})
                    .get("final_text", "")[:200])
         log.info("broken-promise detected: %s", phrase)
-        # Auto-Capture: schreibe die VORHERIGE User-Message als Memory.
-        # Das war die Aussage über die der Bot „gemerkt" sagte ohne zu speichern.
+        # Auto-capture: persist the PREVIOUS user message as a memory.
+        # That was the statement about which the bot said "noted" without saving.
         prev_user_msg = ""
-        for ev in reversed(events.load()[:-1]):  # exclude aktuell geloggten prompt
+        for ev in reversed(events.load()[:-1]):  # exclude prompt we just logged
             if ev.get("type") == "prompt_received":
                 prev_user_msg = ev.get("user_message", "")
                 break
@@ -408,7 +408,7 @@ async def run(user_message: str) -> dict:
                        memory_id=captured.get("id"))
             log.info("auto-captured prev user-msg as memory: %s",
                      prev_user_msg[:80])
-            # Reload memory_block so the new entry is im Prompt
+            # Reload memory_block so the new entry shows up in the prompt
             reloaded = store.load()
             if selection_ids and len(reloaded) >= 15:
                 memory_block = format_for_prompt_selected(
@@ -416,7 +416,7 @@ async def run(user_message: str) -> dict:
             else:
                 memory_block = format_for_prompt(reloaded)
 
-    # Korrektur-Detection: schaut in events.jsonl nach letzter response_sent
+    # Correction detection: looks at the last response_sent in events.jsonl
     correction_trigger = detect_correction(user_message)
     correction_note = ""
     if correction_trigger:
@@ -437,7 +437,7 @@ async def run(user_message: str) -> dict:
     # Broken-promise note must come before correction — higher priority.
     if broken_promise_note:
         messages.append({"role": "system", "content": broken_promise_note})
-    # #12 Conflict-Reminder: ungelöste Konflikte aus dem vorherigen Turn
+    # #12 conflict reminder: unresolved conflicts from the previous turn
     if pending_conflicts:
         items = "\n".join(
             f"- existing [{c.get('existing_id','?')}]: {c.get('existing_content','')[:100]}\n"
@@ -445,16 +445,16 @@ async def run(user_message: str) -> dict:
             for c in pending_conflicts[-3:]
         )
         messages.append({"role": "system", "content": (
-            "MEMORY-CONFLICTS aus dem letzten Turn (nicht blockiert, "
-            "aber prüfe ob Update/Klarstellung nötig):\n" + items
+            "MEMORY CONFLICTS from the previous turn (not blocking, but "
+            "check whether an update or clarification is needed):\n" + items
         )})
     if correction_note:
         messages.append({"role": "system", "content": correction_note})
-    # Recency-Bias: style memories direkt vor User-Message wiederholen.
+    # Recency bias: repeat style memories directly before the user message.
     behavior_reminder = render_behaviors(store.load())
     if behavior_reminder:
         messages.append({"role": "system", "content": behavior_reminder})
-    # Multi-Turn-Conversation aus Event-Log rekonstruieren.
+    # Reconstruct multi-turn conversation from the event log.
     for p in recent_pairs:
         if p.get("user"):
             messages.append({"role": "user", "content": p["user"]})
@@ -464,11 +464,11 @@ async def run(user_message: str) -> dict:
 
     blocks_executed = 0
     final_text = ""
-    last_compression_iter = 0  # #8 Cooldown-Counter
+    last_compression_iter = 0  # #8 cooldown counter
 
     async with httpx.AsyncClient() as client:
         for iteration in range(1, MAX_ITERATIONS + 1):
-            # #8 Compression-Check: vor jedem Model-Call prüfen ob Threshold
+            # #8 compression check: test threshold before every model call
             need_compress = (
                 (len(messages) > COMPRESS_THRESHOLD_MESSAGES
                  or _msg_chars(messages) > COMPRESS_THRESHOLD_CHARS)
@@ -524,7 +524,7 @@ async def run(user_message: str) -> dict:
                            code_snippet=code[:200])
             messages.append({"role": "user", "content": "\n\n".join(results)})
 
-        # Budget erreicht — Summary-Call ohne weitere Code-Blöcke.
+        # Budget reached — summary call without further code blocks.
         events.log("error", where="run", message="budget_exhausted",
                    iterations=MAX_ITERATIONS,
                    blocks_executed=blocks_executed)
@@ -535,11 +535,11 @@ async def run(user_message: str) -> dict:
             final_text = await call_model(client, summary_messages)
         except Exception as exc:
             logger.exception("budget summary call failed: %s", exc)
-            final_text = (f"(Budget erreicht nach {MAX_ITERATIONS} "
-                          f"Iterationen, Summary-Call fehlgeschlagen: {exc})")
+            final_text = (f"(budget reached after {MAX_ITERATIONS} "
+                          f"iterations, summary call failed: {exc})")
         if not final_text:
-            final_text = (f"(Budget erreicht nach {MAX_ITERATIONS} "
-                          "Iterationen — kein Summary-Output)")
+            final_text = (f"(budget reached after {MAX_ITERATIONS} "
+                          "iterations — no summary output)")
         events.log("response_sent", iterations=MAX_ITERATIONS,
                    blocks_executed=blocks_executed,
                    final_text=final_text[:1000])
@@ -563,7 +563,7 @@ def _post_run_maintenance(events: EventLog, store: MemoryStore,
     """After every run: auto-fuse, auto-crystallize, conflict-detect.
     initial_mem_ids: memory IDs at the START of the run (for conflict-detect)."""
     log = logging.getLogger("soma")
-    # #12 Conflict-Detection: prüfe alle in diesem Run geschriebenen Memories
+    # #12 conflict detection: check every memory written during this run
     if initial_mem_ids is not None:
         try:
             current = store.load()
@@ -586,7 +586,7 @@ def _post_run_maintenance(events: EventLog, store: MemoryStore,
         except Exception as exc:
             log.exception("conflict-detection failed: %s", exc)
 
-    # Auto-Fusion: jeder Run, da günstig
+    # Auto-fusion: every run — cheap operation
     try:
         merged = store.fuse()
         if merged > 0:
