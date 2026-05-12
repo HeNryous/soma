@@ -4,6 +4,12 @@
 
 # Soma
 
+```bash
+git clone https://github.com/HeNryous/soma.git && cd soma && ./install.sh
+$EDITOR .env        # paste your Telegram token + chat-id + LLM endpoint
+./start_soma.sh
+```
+
 A lightweight, model-agnostic agent harness that learns through interaction.
 
 Soma is the cell body of a neuron — the integrator where inputs from many
@@ -260,9 +266,9 @@ Once `.env` is filled in, talk to your bot in Telegram. Send "create test.txt
 with Hello". The file appears in `data/sandbox/workspace/test.txt`. That's
 the loop.
 
-For CLI smoke-tests without Telegram: `.venv/bin/python3 core.py "your message"`.
+For CLI smoke-tests without Telegram: `.venv/bin/python3 src/core.py "your message"`.
 
-For state at a glance: `.venv/bin/python3 status.py`.
+For state at a glance: `.venv/bin/python3 src/status.py`.
 
 All runtime state (memories, events, inner state, inbox uploads, pip-installed
 packages inside the sandbox) lives under `data/` and is gitignored — the repo
@@ -366,22 +372,25 @@ elsewhere. Names + one-liners; follow the breadcrumbs for the papers.
 
 ```
 soma/
-├── core.py            — PTC loop, compression, conflict-detect, _post_run_maintenance
-├── memory.py          — JSONL store + fuse + prune + score + tag-conflict
-├── events.py          — append-only log + correction + broken-promise + recent-turns
-├── background.py      — async curator: queue + idle-tick + sleep + browse + notify
-├── crystallize.py     — skill kristallisation from event-log code patterns
-├── self_model.py      — derive(), summarize(), describe() — what the system knows
-├── state.py           — inner states (curiosity / boredom / confidence)
-├── telegram.py        — aiogram bot + debounce + serialize + file-handler
-├── status.py          — human-readable CLI dashboard
-├── envfile.py         — minimal .env parser (no python-dotenv)
-├── start_soma.sh      — convenience launcher (uses .venv/ if present)
+├── src/
+│   ├── core.py        — PTC loop, compression, conflict-detect, classifiers
+│   ├── memory.py      — JSONL store + fuse + prune + score + tag-conflict
+│   ├── events.py      — append-only log + correction + broken-promise renderers
+│   ├── background.py  — async curator: queue + idle-tick + sleep + browse + notify
+│   ├── crystallize.py — skill crystallization from event-log code patterns
+│   ├── self_model.py  — derive(), summarize(), describe() — what the system knows
+│   ├── state.py       — inner states (curiosity / boredom / confidence)
+│   ├── telegram.py    — aiogram bot + debounce + serialize + file-handler
+│   ├── status.py      — human-readable CLI dashboard
+│   └── envfile.py     — minimal .env parser (no python-dotenv)
+├── tests/             — eight unit-test files, ~60 tests, all green
+├── docs/
+│   └── banner.jpg     — README header image
 ├── install.sh         — one-shot installer: prereq-check, venv, deps, sandbox, tests
 ├── update.sh          — pull + re-install + restart, with auto-rollback on failure
-├── requirements.txt   — three host-side Python deps
+├── start_soma.sh      — convenience launcher (uses .venv/ if present)
 ├── soma.service       — example systemd unit (cp to /etc/systemd/system/)
-├── test_*.py          — eight unit-test files, ~50 tests, all green
+├── requirements.txt   — three host-side Python deps
 ├── .env.example       — copy + paste your token
 └── data/              — gitignored, holds all runtime state
     ├── workspace/     — bind-mounted into the container

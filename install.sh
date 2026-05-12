@@ -134,18 +134,20 @@ fi
 
 info "Running test suite..."
 FAILED=0
-for t in test_memory.py test_events.py test_crystallize.py test_state.py \
-         test_self_model.py test_telegram.py test_background.py test_core.py; do
-    if python3 "$t" >/dev/null 2>&1; then
-        info "  ✓ $t"
+for t in tests/test_memory.py tests/test_events.py tests/test_crystallize.py \
+         tests/test_state.py tests/test_self_model.py tests/test_telegram.py \
+         tests/test_background.py tests/test_core.py; do
+    if "$VENV_DIR/bin/python3" "$t" >/dev/null 2>&1; then
+        info "  ✓ $(basename $t)"
     else
-        err "  ✗ $t"
+        err "  ✗ $(basename $t)"
         FAILED=1
     fi
 done
 
 if [ "$FAILED" -ne 0 ]; then
-    err "Some tests failed. Re-run a single suite to see details:  python3 test_memory.py"
+    err "Some tests failed. Re-run a single suite to see details:"
+    err "  .venv/bin/python3 tests/test_memory.py"
     exit 1
 fi
 
@@ -159,4 +161,4 @@ info "  1. Edit .env (if you haven't yet)"
 info "  2. Run:  ./start_soma.sh"
 info "     or install soma.service (edit the User= and WorkingDirectory= placeholders first)"
 info ""
-info "Check status any time with:  python3 status.py"
+info "Check status any time with:  .venv/bin/python3 src/status.py"

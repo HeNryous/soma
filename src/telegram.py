@@ -23,8 +23,8 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from envfile import load_env
 
-# Load .env BEFORE anything else reads env vars.
-ENV_PATH = Path(__file__).parent / ".env"
+# Load .env from the repo root BEFORE anything else reads env vars.
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_env(ENV_PATH)
 
 

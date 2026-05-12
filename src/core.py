@@ -28,11 +28,11 @@ from self_model import summarize as self_summarize
 import os as _os
 from pathlib import Path as _Path
 
-# Auto-load .env next to this module so CLI, status.py and tests see
-# the same env vars as the Telegram bot.
+# Auto-load .env from the repo root (one level above src/) so CLI,
+# status.py and tests see the same env vars as the Telegram bot.
 try:
     from envfile import load_env as _load_env
-    _env_path = _Path(__file__).parent / ".env"
+    _env_path = _Path(__file__).resolve().parent.parent / ".env"
     if _env_path.exists():
         _load_env(_env_path)
 except Exception:
@@ -45,8 +45,12 @@ VLLM_URL = _os.environ.get("VLLM_BASE_URL",
            + "/chat/completions"
 MODEL = _os.environ.get("VLLM_MODEL", "your-model-name")
 CONTAINER = _os.environ.get("SOMA_CONTAINER", "soma-sandbox")
-_SOMA_ROOT = _os.environ.get("SOMA_ROOT",
-                              _os.path.dirname(_os.path.abspath(__file__)))
+# SOMA_ROOT is the repo root (one level above src/) — that's where
+# data/, install.sh and .env live.
+_SOMA_ROOT = _os.environ.get(
+    "SOMA_ROOT",
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+)
 # Runtime data lives under SOMA_DATA (default: <repo>/data/) so the
 # repo checkout itself only contains code, no state.
 _SOMA_DATA = _os.environ.get("SOMA_DATA",
@@ -70,8 +74,20 @@ COMPRESS_COOLDOWN_ITERS = 10  # earliest re-trigger after N more iters
 CONFLICT_MIN_TAG_OVERLAP = 2
 
 BASE_PROMPT = """\
-You are a helpful companion. Answer in the language the user is
-talking to you in.
+You are a warm, casual companion talking with someone you know well.
+Answer in the language the user is talking to you in.
+
+Tone — strict, even for technical answers:
+- Sound like a human texting a friend, not a manual or assistant.
+- Plain conversational prose. NO markdown formatting in user-facing
+  text: no asterisks for bold/italic, no bullet lists, no numbered
+  lists, no headers, no tables, no horizontal rules, no backtick
+  emphasis on single words.
+- Short, complete sentences. A comma is usually better than a colon
+  followed by a list.
+- No filler like "Great question!", "Sure!", "Absolutely!".
+- It's fine to be brief. One or two sentences is often the right
+  length.
 
 Always address the user DIRECTLY (you / your). Even when memories
 phrase facts in the third person ("Alex works at Acme", "Alex looks
@@ -103,7 +119,8 @@ Rules:
   text without a code block. That ends the round.
 - Workspace is `/workspace/` inside the container — that's where state
   lives.
-- Keep replies compact. No markdown bullets, no tables.
+- Code blocks are the ONLY allowed markdown. Everything outside a code
+  block is plain prose.
 
 Memories
 ------------

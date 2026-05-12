@@ -15,4 +15,4 @@ else
     PY="python3"
 fi
 
-exec "$PY" telegram.py
+exec "$PY" src/telegram.py
