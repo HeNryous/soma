@@ -18,7 +18,7 @@ holds the loop, the memory, the body, and the slow learning around a fast,
 ephemeral language model.
 
 Single-user by design. Local-first. Runs on consumer hardware.
-**~3400 lines of Python, three dependencies, no framework.**
+**~2700 lines of Python, three dependencies, no framework.**
 
 ---
 
@@ -123,14 +123,21 @@ Score function `recency × (1 + log frequency) × type_weight`. Auto-prune at
 fusion of near-duplicates.
 
 ### 7. Closed-loop correction
-- `detect_correction` recognizes negation / contradiction keywords ("no",
-  "wrong", "shorter", "different", and similar — list is configurable
-  in `events.py:CORRECTION_PATTERNS`)
-- `build_broken_promise_note` catches the model lying ("noted" without
-  an actual memory write) and the next turn deterministically
-  auto-captures the previous user message
-- Memory-conflict detection: ≥2 shared tags + same type → logged + reminder
-  injected next turn
+- **Language-neutral correction detector** — a tiny LLM classifier
+  (`classify_correction` in `core.py`, one extra call per turn,
+  `temperature=0`, ~5 tokens out) asks YES/NO whether the user message
+  is a correction or contradiction of the previous reply. If yes, a
+  `CORRECTION-SIGNAL` system message is injected for the next turn.
+- **Broken-promise classifier** — a parallel LLM classifier
+  (`classify_memory_promise`) decides whether the previous bot reply
+  claimed to have remembered / noted / saved something WITHOUT running
+  a code block. If yes, the current turn deterministically auto-captures
+  the previous user message as a semantic memory tagged `auto-captured`.
+- Both classifiers run in parallel via `asyncio.gather` inside the same
+  `httpx` client; pre-filters keep them cheap (skip when no previous
+  reply, when message is long, or when blocks were executed).
+- **Memory-conflict detection**: ≥2 shared tags + same type → logged
+  + reminder injected next turn.
 
 ### 8. Context compression (Head-Middle-Tail)
 At >40 messages or >200K chars: head (first 5) + tail (last 10) kept intact,
@@ -178,14 +185,16 @@ Files arrive on the same buffer:
 Telegram-Bot (aiogram)
   │
   ├── Foreground: core.run()        — chats, executes (PTC)
+  │     ├── LLM classifiers         — correction + broken-promise (parallel)
   │     └── _post_run_maintenance   — fusion, crystallization, conflict-detect
   │
-  └── Background: async curator     — observes, learns, notices, sleeps
+  └── Background: async curator     — observes, learns, sleeps
         ├── reads event-log → writes missing memories
-        ├── detects corrections     → immediate semantic memory
-        ├── detects failed execs    → procedural error-lesson
+        ├── extracts lessons from failed execs → procedural memory
+        ├── picks 5-8 relevant memories per turn → context_selection.json
         ├── tracks inner states     (curiosity / boredom / confidence)
-        ├── inbox-watch             — notes unprocessed files
+        ├── curiosity research      → fetches one page when curiosity > 0.65
+        ├── bored-browse            → free web browsing, rate-limited
         ├── proactive notification  → notify_user.txt → bot.send_message
         ├── sleep-consolidation     — NREM fuse+prune, REM synthesis
         └── self-monitoring + reflection
@@ -263,8 +272,7 @@ What you still provide:
 - A Telegram bot token (via `@BotFather`) and your numeric chat-id
 
 Once `.env` is filled in, talk to your bot in Telegram. Send "create test.txt
-with Hello". The file appears in `data/sandbox/workspace/test.txt`. That's
-the loop.
+with Hello". The file appears in `data/workspace/test.txt`. That's the loop.
 
 For CLI smoke-tests without Telegram: `.venv/bin/python3 src/core.py "your message"`.
 
@@ -281,12 +289,17 @@ If you prefer not to use the installer:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-mkdir -p data/sandbox-home data/sandbox/workspace data/sandbox/inbox
-docker run -d --name soma-sandbox --network bridge --restart unless-stopped \
-  -v "$PWD/data/sandbox-home:/root" \
-  -v "$PWD/data/sandbox/workspace:/workspace" \
-  -v "$PWD/data/sandbox/inbox:/inbox" \
-  -w /workspace python:3.12-slim sleep infinity
+mkdir -p data/workspace/inbox data/sandbox-home
+chown -R 1000:1000 data/workspace data/sandbox-home
+docker run -d --name soma-sandbox \
+  --user 1000:1000 \
+  --network bridge --restart unless-stopped \
+  --memory=1g --cpus=2 \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  -v "$PWD/data/workspace:/workspace" \
+  -v "$PWD/data/sandbox-home:/home/sandbox" \
+  -w /workspace -e HOME=/home/sandbox -e PIP_USER=1 \
+  python:3.12-slim sleep infinity
 cp .env.example .env
 # then edit .env: paste your Telegram token, chat-id, LLM endpoint + model
 ./start_soma.sh
@@ -394,30 +407,35 @@ soma/
 ├── requirements.txt   — three host-side Python deps
 ├── .env.example       — copy + paste your token
 └── data/              — gitignored, holds all runtime state
-    ├── workspace/     — bind-mounted into the container
-    ├── events.jsonl   — append-only audit log
-    └── sandbox-home/  — pip --user installs from inside the sandbox
+    ├── workspace/     — bind-mounted to /workspace in the container
+    │   ├── memories.jsonl     — three-type memory store
+    │   ├── state.json         — inner states (curiosity/boredom/confidence)
+    │   ├── context_selection.json — curator-picked memory IDs per turn
+    │   └── inbox/             — uploaded files awaiting processing
+    ├── sandbox-home/  — bind-mounted to /home/sandbox; pip --user persists here
+    └── events.jsonl   — append-only audit log
 ```
 
 ---
 
 ## Status
 
-As of `2026-05-12`: 15/17 brief tests green, 2 yellow (1-week-better needs
-time, proactive-live-trigger needs an organic occasion), 0 red. ~4100 LOC
-across nine modules, no Python framework, three external dependencies.
+As of `2026-05-12`: ~2700 LOC across ten modules in `src/`, no Python
+framework, three external dependencies. **77 unit tests across eight
+files in `tests/`, all green.** CI runs the suite on every push/PR
+against Python 3.10, 3.11 and 3.12.
 
-About 55 unit tests across eight test files. Live-tested against a real
-Telegram bot and a vLLM-served reasoning model: PTC loop, three-type
-memory with immortal/mortal tag split, curator-driven context selection,
-debouncing + serialization, broken-promise auto-capture, post-write
-conflict detection, head-middle-tail compression, sequential file-batch
-handling with one summary message, async background curator with idle-tick,
-sleep consolidation, curiosity-driven research, and bored-browse with
-rate-limits — all confirmed working end-to-end.
+Live-tested against a real Telegram bot and a vLLM-served reasoning
+model: PTC loop, three-type memory with immortal/mortal tag split,
+curator-driven context selection, debouncing + serialization,
+language-neutral LLM-classifier correction + broken-promise auto-capture,
+post-write conflict detection, head-middle-tail compression, sequential
+file-batch handling with one summary message, async background curator
+with idle-tick, sleep consolidation, curiosity-driven research, and
+bored-browse with rate-limits — all confirmed working end-to-end.
 
-Single-user by design. Multi-user would require routing memory + events per
-chat-id and is out of scope.
+Single-user by design. Multi-user would require routing memory + events
+per chat-id and is out of scope.
 
 ---
 
@@ -439,9 +457,10 @@ Most of the interesting design decisions emerged from things that didn't
 work: prompt-only fixes for tool-call hallucination kept failing, which is
 why PTC + broken-promise-detection + auto-capture exist as architectural
 guardrails. The third-person-speech bug led to the message-debouncing +
-serialization lock. The "ich merke mir das" lie led to the deterministic
-auto-capture path. None of these were planned upfront — they were
-debugged into existence during the same session.
+serialization lock. The "I'll remember that" lie — model claiming to have
+saved something without running a code block — led to the deterministic
+auto-capture path. None of these were planned upfront; they were debugged
+into existence during the same session.
 
 The point of saying this openly: Soma is what a single live session of
 agentic coding can produce when the human stays in the loop. Take the

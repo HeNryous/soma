@@ -81,8 +81,13 @@ info "  aiogram, httpx, pyyaml installed"
 # ---------------------------------------------------------------- 3. data tree
 
 info "Creating data/ tree..."
-mkdir -p data/sandbox-home data/sandbox/workspace data/sandbox/inbox
-info "  data/sandbox-home/, data/sandbox/workspace/, data/sandbox/inbox/"
+mkdir -p data/workspace/inbox data/sandbox-home
+# Match the uid the container runs as (1000) so the model can write
+# without root.
+if command -v chown >/dev/null 2>&1; then
+    chown -R 1000:1000 data/workspace data/sandbox-home 2>/dev/null || true
+fi
+info "  data/workspace/, data/workspace/inbox/, data/sandbox-home/"
 
 # ---------------------------------------------------------------- 4. sandbox container
 
@@ -102,12 +107,15 @@ else
     info "  creating container $SANDBOX_NAME..."
     docker run -d \
         --name "$SANDBOX_NAME" \
+        --user 1000:1000 \
         --network bridge \
         --restart unless-stopped \
-        -v "$REPO_DIR/data/sandbox-home:/root" \
-        -v "$REPO_DIR/data/sandbox/workspace:/workspace" \
-        -v "$REPO_DIR/data/sandbox/inbox:/inbox" \
+        --memory=1g --cpus=2 \
+        --cap-drop=ALL --security-opt=no-new-privileges \
+        -v "$REPO_DIR/data/workspace:/workspace" \
+        -v "$REPO_DIR/data/sandbox-home:/home/sandbox" \
         -w /workspace \
+        -e HOME=/home/sandbox -e PIP_USER=1 \
         "$SANDBOX_IMAGE" \
         sleep infinity >/dev/null
     info "  container created"
