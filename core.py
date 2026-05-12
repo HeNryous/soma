@@ -39,7 +39,7 @@ try:
 except Exception:
     pass
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 VLLM_URL = _os.environ.get("VLLM_BASE_URL",
                            "http://localhost:8000/v1").rstrip("/") \
@@ -431,11 +431,10 @@ async def run(user_message: str) -> dict:
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(memory_block)},
     ]
-    # Self-Awareness: kompakte Beschreibung was das System weiß/kann.
     self_awareness = self_summarize(store, events)
     if self_awareness:
         messages.append({"role": "system", "content": self_awareness})
-    # Broken-Promise vor Korrektur einfügen — höhere Priorität.
+    # Broken-promise note must come before correction — higher priority.
     if broken_promise_note:
         messages.append({"role": "system", "content": broken_promise_note})
     # #12 Conflict-Reminder: ungelöste Konflikte aus dem vorherigen Turn

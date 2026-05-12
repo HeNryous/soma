@@ -194,9 +194,9 @@ but **nothing in the harness is hardware-specific**. The model endpoint is
 OpenAI-compatible HTTP.
 
 Minimum reasonable setup:
-- A box running an OpenAI-compatible vLLM (or any compatible inference server)
+- A box running an OpenAI-compatible inference server (vLLM, llama.cpp, Ollama, …)
 - Docker for the sandbox container
-- Python 3.12, aiogram 3.x, httpx, pyyaml
+- Python 3.10+ on the host (3 deps installed automatically: `aiogram`, `httpx`, `pyyaml`)
 - Telegram bot token (single-user)
 
 Model size: works with anything that follows Markdown code-block conventions
@@ -224,38 +224,59 @@ for retro.
 ## Quick start
 
 ```bash
-# 1. Clone + setup
 git clone https://github.com/<your-account>/soma.git
 cd soma
-cp .env.example .env
+./install.sh        # check prereqs, create venv, install deps, build sandbox, run tests
 $EDITOR .env        # paste your Telegram token + numeric chat-id
-
-# 2. Spin up the sandbox (uid 1000 must own the bind-mount dirs)
-mkdir -p data/workspace data/sandbox-home
-docker run -d --name soma-sandbox \
-  --user 1000:1000 \
-  -v "$PWD/data/workspace:/workspace" \
-  -v "$PWD/data/sandbox-home:/home/sandbox" \
-  -w /workspace -e HOME=/home/sandbox -e PIP_USER=1 \
-  --memory=1g --cpus=2 --cap-drop=ALL --security-opt=no-new-privileges \
-  --restart=unless-stopped \
-  python:3.12-slim sleep infinity
-
-# 3. Start the bot
-pip install --user aiogram httpx pyyaml
-python telegram.py
+./start_soma.sh     # run the bot
 ```
+
+That's it. `install.sh` is idempotent — safe to re-run after a pull.
+
+What `install.sh` does:
+
+1. Checks `python3 >= 3.10`, `docker`, `pip`
+2. Creates a `.venv/` next to the repo and installs the 3 host deps
+   (`aiogram`, `httpx`, `pyyaml`) — no system pollution, plays nicely with PEP 668
+3. Creates the `data/` tree (`workspace/`, `inbox/`, `sandbox-home/`)
+4. Pulls `python:3.12-slim` and creates a `soma-sandbox` container with
+   the right bind-mounts
+5. Copies `.env.example` to `.env` if missing
+6. Runs the 8-suite test pack and reports green/red
+
+What you still provide:
+
+- An OpenAI-compatible LLM endpoint (vLLM, llama.cpp server, hosted API)
+- A Telegram bot token (via `@BotFather`) and your numeric chat-id
+
+Once `.env` is filled in, talk to your bot in Telegram. Send "create test.txt
+with Hello". The file appears in `data/sandbox/workspace/test.txt`. That's
+the loop.
+
+For CLI smoke-tests without Telegram: `.venv/bin/python3 core.py "your message"`.
+
+For state at a glance: `.venv/bin/python3 status.py`.
 
 All runtime state (memories, events, inner state, inbox uploads, pip-installed
 packages inside the sandbox) lives under `data/` and is gitignored — the repo
 checkout itself only ever contains code.
 
-Talk to your bot in Telegram. Send "Erstelle test.txt mit Hello".
-The file appears in `data/workspace/test.txt`. That's the loop.
+### Manual install
 
-For CLI smoke-tests without Telegram: `python core.py "your message"`.
+If you prefer not to use the installer:
 
-For state at a glance: `python status.py`.
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+mkdir -p data/sandbox-home data/sandbox/workspace data/sandbox/inbox
+docker run -d --name soma-sandbox --network bridge --restart unless-stopped \
+  -v "$PWD/data/sandbox-home:/root" \
+  -v "$PWD/data/sandbox/workspace:/workspace" \
+  -v "$PWD/data/sandbox/inbox:/inbox" \
+  -w /workspace python:3.12-slim sleep infinity
+cp .env.example .env && $EDITOR .env
+./start_soma.sh
+```
 
 ### Optional: systemd service
 
@@ -348,7 +369,9 @@ soma/
 ├── telegram.py        — aiogram bot + debounce + serialize + file-handler
 ├── status.py          — human-readable CLI dashboard
 ├── envfile.py         — minimal .env parser (no python-dotenv)
-├── start_soma.sh      — convenience launcher
+├── start_soma.sh      — convenience launcher (uses .venv/ if present)
+├── install.sh         — one-shot installer: prereq-check, venv, deps, sandbox, tests
+├── requirements.txt   — three host-side Python deps
 ├── soma.service       — example systemd unit (cp to /etc/systemd/system/)
 ├── test_*.py          — eight unit-test files, ~50 tests, all green
 ├── .env.example       — copy + paste your token

@@ -1,5 +1,6 @@
-# User-Daten + lokale State (alles unter data/)
+# User data + local state
 .env
+.venv/
 data/
 *.bak.jsonl
 

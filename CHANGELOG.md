@@ -19,6 +19,36 @@ under a leading `0.` until the architecture is stable enough for `1.0`.
 
 _Nothing yet._
 
+## [0.2.0] — 2026-05-12
+
+One-shot installer pipeline. A fresh clone can now reach a runnable bot
+with `./install.sh && $EDITOR .env && ./start_soma.sh`.
+
+### Added
+
+- **`install.sh`** — idempotent bootstrap script that:
+  1. Verifies `python3 >= 3.10`, `docker` daemon, `pip`
+  2. Creates `.venv/` next to the repo and installs the three host deps
+     (works around PEP 668 / externally-managed-environment cleanly)
+  3. Creates the `data/` tree (`sandbox-home/`, `sandbox/workspace/`,
+     `sandbox/inbox/`)
+  4. Pulls `python:3.12-slim` and creates the `soma-sandbox` container
+     with proper bind-mounts
+  5. Copies `.env.example` → `.env` on first run
+  6. Runs all eight test suites and reports pass/fail
+- **`requirements.txt`** — pinned host deps (`aiogram >= 3.0`,
+  `httpx >= 0.27`, `pyyaml >= 6.0`).
+- **`.venv/` integration** — `start_soma.sh` and `soma.service` now
+  prefer `.venv/bin/python3` when present.
+
+### Changed
+
+- `.env.example`, `start_soma.sh`, `soma.service` comments translated
+  to English (leftover German from `0.1.0`).
+- `README.md` Quick start rewritten around the installer; manual install
+  kept as a fallback section.
+- `.gitignore` now ignores `.venv/`.
+
 ## [0.1.0] — 2026-05-12
 
 First public release. Soma is a lightweight, model-agnostic agent harness

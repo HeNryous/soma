@@ -9,10 +9,10 @@ Type=simple
 User=YOUR_USER
 Group=YOUR_USER
 WorkingDirectory=/path/to/soma
-ExecStart=/usr/bin/python3 telegram.py
+ExecStart=/path/to/soma/.venv/bin/python3 telegram.py
 Restart=on-failure
 RestartSec=10
-# Logs gehen ins journal — abrufbar via `journalctl -u soma -f`
+# Logs go to journald — view with `journalctl -u soma -f`
 StandardOutput=journal
 StandardError=journal
 
