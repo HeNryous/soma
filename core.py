@@ -20,9 +20,8 @@ import httpx
 from memory import (MemoryStore, format_for_prompt,
                     format_for_prompt_selected, render_behaviors,
                     read_context_selection)
-from events import (EventLog, detect_correction, build_correction_note,
-                    render_recent_turns, build_broken_promise_note,
-                    detect_memory_promise)
+from events import (EventLog, build_correction_note,
+                    render_recent_turns, build_broken_promise_note)
 from self_model import summarize as self_summarize
 
 
@@ -302,14 +301,16 @@ async def compress_middle(client: httpx.AsyncClient,
     return head + [summary_msg] + tail
 
 
-async def call_model(client: httpx.AsyncClient, messages: list[dict]) -> str:
+async def call_model(client: httpx.AsyncClient, messages: list[dict],
+                     *, max_tokens: int = 4096,
+                     temperature: float = 0.7) -> str:
     r = await client.post(
         VLLM_URL,
         json={
             "model": MODEL,
             "messages": messages,
-            "max_tokens": 4096,
-            "temperature": 0.7,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
         },
         timeout=180.0,
     )
@@ -317,6 +318,75 @@ async def call_model(client: httpx.AsyncClient, messages: list[dict]) -> str:
     msg = r.json()["choices"][0]["message"]
     # Reasoning models can have content=null; reasoning_content is the fallback.
     return (msg.get("content") or msg.get("reasoning_content") or "").strip()
+
+
+CLASSIFIER_SYSTEM = (
+    "You are a strict binary classifier. Reply with exactly one token: "
+    "YES or NO. No punctuation, no explanation."
+)
+
+
+async def classify_correction(client: httpx.AsyncClient,
+                              user_message: str,
+                              prev_bot_text: str) -> str | None:
+    """Language-neutral correction detection. Returns "correction" when
+    the user message looks like a correction/contradiction/pushback
+    against the previous assistant reply, else None.
+
+    Cheap pre-filter: skip when no previous reply or user message is
+    long (corrections are short reactions, not new tasks)."""
+    if not user_message or not prev_bot_text:
+        return None
+    if len(user_message) > 200:
+        return None
+    prompt = (
+        "Decide whether the user message is a correction, contradiction, "
+        "or pushback against the previous assistant reply.\n\n"
+        f"Previous assistant reply: {prev_bot_text[:500]}\n"
+        f"User message: {user_message[:300]}\n\n"
+        "Answer YES or NO."
+    )
+    try:
+        text = await call_model(
+            client,
+            [{"role": "system", "content": CLASSIFIER_SYSTEM},
+             {"role": "user", "content": prompt}],
+            max_tokens=5,
+            temperature=0.0,
+        )
+    except Exception:
+        return None
+    return "correction" if text.strip().upper().startswith("YES") else None
+
+
+async def classify_memory_promise(client: httpx.AsyncClient,
+                                  bot_text: str,
+                                  blocks_executed: int) -> str | None:
+    """Language-neutral broken-promise detection. Returns "memory_promise"
+    when the bot's reply claims it just remembered / noted / saved
+    something WITHOUT actually running a code block, else None.
+
+    Cheap pre-filter: only run when blocks_executed == 0."""
+    if not bot_text or blocks_executed != 0:
+        return None
+    prompt = (
+        "Decide whether the assistant reply makes an explicit promise or "
+        "claim that it just remembered, noted, saved, recorded, or wrote "
+        "down a piece of information.\n\n"
+        f"Assistant reply: {bot_text[:500]}\n\n"
+        "Answer YES or NO."
+    )
+    try:
+        text = await call_model(
+            client,
+            [{"role": "system", "content": CLASSIFIER_SYSTEM},
+             {"role": "user", "content": prompt}],
+            max_tokens=5,
+            temperature=0.0,
+        )
+    except Exception:
+        return None
+    return "memory_promise" if text.strip().upper().startswith("YES") else None
 
 
 def format_result(idx: int, total: int, lang: str, result: dict) -> str:
@@ -375,98 +445,98 @@ async def run(user_message: str) -> dict:
 
     events.log("prompt_received", user_message=user_message)
 
-    # Broken-promise detection: did the last reply say "noted" / "gemerkt"
-    # WITHOUT writing a memory? If so (a) inject a reminder AND (b)
-    # deterministically persist the triggering user message as a memory —
-    # the model has proven 3x that it lies instead of writing.
     last_resp_for_promise = events.last("response_sent")
-    broken_promise_note = build_broken_promise_note(last_resp_for_promise)
-    if broken_promise_note:
-        phrase = detect_memory_promise(
-            (last_resp_for_promise or {}).get("final_text", "")
-        )
-        events.log("memory_promise_unfulfilled", phrase=phrase,
-                   prior_response=(last_resp_for_promise or {})
-                   .get("final_text", "")[:200])
-        log.info("broken-promise detected: %s", phrase)
-        # Auto-capture: persist the PREVIOUS user message as a memory.
-        # That was the statement about which the bot said "noted" without saving.
-        prev_user_msg = ""
-        for ev in reversed(events.load()[:-1]):  # exclude prompt we just logged
-            if ev.get("type") == "prompt_received":
-                prev_user_msg = ev.get("user_message", "")
-                break
-        if prev_user_msg and len(prev_user_msg) > 50:
-            captured = store.append(
-                "semantic",
-                prev_user_msg[:500],
-                tags=["auto-captured", "from-broken-promise"],
-            )
-            events.log("memory_auto_captured",
-                       reason="broken_promise",
-                       content_preview=prev_user_msg[:120],
-                       memory_id=captured.get("id"))
-            log.info("auto-captured prev user-msg as memory: %s",
-                     prev_user_msg[:80])
-            # Reload memory_block so the new entry shows up in the prompt
-            reloaded = store.load()
-            if selection_ids and len(reloaded) >= 15:
-                memory_block = format_for_prompt_selected(
-                    reloaded, selection_ids, user_message)
-            else:
-                memory_block = format_for_prompt(reloaded)
-
-    # Correction detection: looks at the last response_sent in events.jsonl
-    correction_trigger = detect_correction(user_message)
-    correction_note = ""
-    if correction_trigger:
-        last_resp = events.last("response_sent")
-        correction_note = build_correction_note(last_resp, correction_trigger,
-                                                 user_message)
-        if correction_note:
-            events.log("correction", trigger=correction_trigger,
-                       last_response=(last_resp or {}).get("final_text", "")[:200])
-            log.info("correction detected: %s", correction_trigger)
-
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(memory_block)},
-    ]
-    self_awareness = self_summarize(store, events)
-    if self_awareness:
-        messages.append({"role": "system", "content": self_awareness})
-    # Broken-promise note must come before correction — higher priority.
-    if broken_promise_note:
-        messages.append({"role": "system", "content": broken_promise_note})
-    # #12 conflict reminder: unresolved conflicts from the previous turn
-    if pending_conflicts:
-        items = "\n".join(
-            f"- existing [{c.get('existing_id','?')}]: {c.get('existing_content','')[:100]}\n"
-            f"  vs new [{c.get('new_id','?')}]: {c.get('new_content','')[:100]}"
-            for c in pending_conflicts[-3:]
-        )
-        messages.append({"role": "system", "content": (
-            "MEMORY CONFLICTS from the previous turn (not blocking, but "
-            "check whether an update or clarification is needed):\n" + items
-        )})
-    if correction_note:
-        messages.append({"role": "system", "content": correction_note})
-    # Recency bias: repeat style memories directly before the user message.
-    behavior_reminder = render_behaviors(store.load())
-    if behavior_reminder:
-        messages.append({"role": "system", "content": behavior_reminder})
-    # Reconstruct multi-turn conversation from the event log.
-    for p in recent_pairs:
-        if p.get("user"):
-            messages.append({"role": "user", "content": p["user"]})
-        if p.get("assistant"):
-            messages.append({"role": "assistant", "content": p["assistant"]})
-    messages.append({"role": "user", "content": user_message})
+    prev_bot_text = (last_resp_for_promise or {}).get("final_text", "")
+    prev_blocks = (last_resp_for_promise or {}).get("blocks_executed", 0)
 
     blocks_executed = 0
     final_text = ""
     last_compression_iter = 0  # #8 cooldown counter
 
     async with httpx.AsyncClient() as client:
+        # Two language-neutral classifications, in parallel:
+        #   1) Is the new user message a correction of the previous reply?
+        #   2) Did the previous reply make a memory-write promise without a code block?
+        correction_trigger, promise_signal = await asyncio.gather(
+            classify_correction(client, user_message, prev_bot_text),
+            classify_memory_promise(client, prev_bot_text, prev_blocks),
+        )
+
+        broken_promise_note = build_broken_promise_note(
+            last_resp_for_promise, promise_signal or "")
+        if broken_promise_note:
+            events.log("memory_promise_unfulfilled",
+                       prior_response=prev_bot_text[:200])
+            log.info("broken-promise detected")
+            # Auto-capture: persist the PREVIOUS user message as a memory.
+            # That was the statement about which the bot claimed to remember.
+            prev_user_msg = ""
+            for ev in reversed(events.load()[:-1]):
+                if ev.get("type") == "prompt_received":
+                    prev_user_msg = ev.get("user_message", "")
+                    break
+            if prev_user_msg and len(prev_user_msg) > 50:
+                captured = store.append(
+                    "semantic",
+                    prev_user_msg[:500],
+                    tags=["auto-captured", "from-broken-promise"],
+                )
+                events.log("memory_auto_captured",
+                           reason="broken_promise",
+                           content_preview=prev_user_msg[:120],
+                           memory_id=captured.get("id"))
+                log.info("auto-captured prev user-msg as memory: %s",
+                         prev_user_msg[:80])
+                # Reload memory_block so the new entry shows up in the prompt
+                reloaded = store.load()
+                if selection_ids and len(reloaded) >= 15:
+                    memory_block = format_for_prompt_selected(
+                        reloaded, selection_ids, user_message)
+                else:
+                    memory_block = format_for_prompt(reloaded)
+
+        correction_note = ""
+        if correction_trigger:
+            correction_note = build_correction_note(
+                last_resp_for_promise, correction_trigger, user_message)
+            if correction_note:
+                events.log("correction", trigger=correction_trigger,
+                           last_response=prev_bot_text[:200])
+                log.info("correction detected")
+
+        messages: list[dict] = [
+            {"role": "system", "content": build_system_prompt(memory_block)},
+        ]
+        self_awareness = self_summarize(store, events)
+        if self_awareness:
+            messages.append({"role": "system", "content": self_awareness})
+        # Broken-promise note must come before correction — higher priority.
+        if broken_promise_note:
+            messages.append({"role": "system", "content": broken_promise_note})
+        # #12 conflict reminder: unresolved conflicts from the previous turn
+        if pending_conflicts:
+            items = "\n".join(
+                f"- existing [{c.get('existing_id','?')}]: {c.get('existing_content','')[:100]}\n"
+                f"  vs new [{c.get('new_id','?')}]: {c.get('new_content','')[:100]}"
+                for c in pending_conflicts[-3:]
+            )
+            messages.append({"role": "system", "content": (
+                "MEMORY CONFLICTS from the previous turn (not blocking, but "
+                "check whether an update or clarification is needed):\n" + items
+            )})
+        if correction_note:
+            messages.append({"role": "system", "content": correction_note})
+        # Recency bias: repeat style memories directly before the user message.
+        behavior_reminder = render_behaviors(store.load())
+        if behavior_reminder:
+            messages.append({"role": "system", "content": behavior_reminder})
+        # Reconstruct multi-turn conversation from the event log.
+        for p in recent_pairs:
+            if p.get("user"):
+                messages.append({"role": "user", "content": p["user"]})
+            if p.get("assistant"):
+                messages.append({"role": "assistant", "content": p["assistant"]})
+        messages.append({"role": "user", "content": user_message})
         for iteration in range(1, MAX_ITERATIONS + 1):
             # #8 compression check: test threshold before every model call
             need_compress = (

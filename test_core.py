@@ -185,6 +185,130 @@ def test_post_run_conflict_detected():
         print("✓ post_run_conflict_detected")
 
 
+def test_classify_correction_yes():
+    """Classifier returns 'correction' when call_model says YES."""
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_correction
+
+    async def go():
+        async def fake_call(client, messages, **kwargs):
+            return "YES"
+        with patch("core.call_model", fake_call):
+            r = await classify_correction(None, "wrong, do it again",
+                                          "Here is a poem.")
+        assert r == "correction"
+    asyncio.run(go())
+    print("✓ classify_correction_yes")
+
+
+def test_classify_correction_no():
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_correction
+
+    async def go():
+        async def fake_call(client, messages, **kwargs):
+            return "NO"
+        with patch("core.call_model", fake_call):
+            r = await classify_correction(None, "thanks!",
+                                          "Here is a poem.")
+        assert r is None
+    asyncio.run(go())
+    print("✓ classify_correction_no")
+
+
+def test_classify_correction_skips_long_message():
+    """Long user messages aren't corrections — no LLM call."""
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_correction
+
+    async def go():
+        called = {"n": 0}
+        async def fake_call(client, messages, **kwargs):
+            called["n"] += 1
+            return "YES"
+        long_msg = "a" * 250
+        with patch("core.call_model", fake_call):
+            r = await classify_correction(None, long_msg, "previous reply")
+        assert r is None
+        assert called["n"] == 0
+    asyncio.run(go())
+    print("✓ classify_correction_skips_long_message")
+
+
+def test_classify_correction_skips_no_prev():
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_correction
+
+    async def go():
+        called = {"n": 0}
+        async def fake_call(client, messages, **kwargs):
+            called["n"] += 1
+            return "YES"
+        with patch("core.call_model", fake_call):
+            r = await classify_correction(None, "x", "")
+        assert r is None
+        assert called["n"] == 0
+    asyncio.run(go())
+    print("✓ classify_correction_skips_no_prev")
+
+
+def test_classify_memory_promise_yes():
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_memory_promise
+
+    async def go():
+        async def fake_call(client, messages, **kwargs):
+            return "YES"
+        with patch("core.call_model", fake_call):
+            r = await classify_memory_promise(None,
+                                              "Noted that down.", 0)
+        assert r == "memory_promise"
+    asyncio.run(go())
+    print("✓ classify_memory_promise_yes")
+
+
+def test_classify_memory_promise_skips_when_blocks_executed():
+    """If blocks_executed > 0, no promise check (bot wrote a memory)."""
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_memory_promise
+
+    async def go():
+        called = {"n": 0}
+        async def fake_call(client, messages, **kwargs):
+            called["n"] += 1
+            return "YES"
+        with patch("core.call_model", fake_call):
+            r = await classify_memory_promise(None, "Noted.", 3)
+        assert r is None
+        assert called["n"] == 0
+    asyncio.run(go())
+    print("✓ classify_memory_promise_skips_when_blocks_executed")
+
+
+def test_classify_handles_call_failure():
+    """LLM call failure → graceful None, no exception."""
+    import asyncio
+    from unittest.mock import patch
+    from core import classify_correction, classify_memory_promise
+
+    async def go():
+        async def failing(client, messages, **kwargs):
+            raise RuntimeError("vLLM down")
+        with patch("core.call_model", failing):
+            r1 = await classify_correction(None, "x", "y")
+            r2 = await classify_memory_promise(None, "Noted.", 0)
+        assert r1 is None
+        assert r2 is None
+    asyncio.run(go())
+    print("✓ classify_handles_call_failure")
+
+
 if __name__ == "__main__":
     test_threshold_constant()
     test_auto_fuse_runs_every_time()
@@ -195,4 +319,11 @@ if __name__ == "__main__":
     test_compress_middle_short_passthrough()
     test_compress_middle_head_tail_intact()
     test_post_run_conflict_detected()
+    test_classify_correction_yes()
+    test_classify_correction_no()
+    test_classify_correction_skips_long_message()
+    test_classify_correction_skips_no_prev()
+    test_classify_memory_promise_yes()
+    test_classify_memory_promise_skips_when_blocks_executed()
+    test_classify_handles_call_failure()
     print("\nAll core tests passed.")

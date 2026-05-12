@@ -105,35 +105,11 @@ def render_recent_turns(pairs: list[dict], max_chars: int = 200) -> str:
     return "\n".join(lines).rstrip()
 
 
-# --- Correction detection (P6 closed-loop) ---
-
-import re as _re
-
-# Matched with word boundaries to avoid false positives (e.g. "no" must
-# not fire inside "node" / "nothing").
-CORRECTION_PATTERNS = (
-    "no", "not", "wrong", "shorter", "different", "actually",
-    "doesn't fit", "again", "too long", "too short", "too much",
-    "not like that", "do it differently",
-)
-
-_CORRECTION_REGEXES = tuple(
-    (kw, _re.compile(r"\b" + _re.escape(kw) + r"\b", _re.IGNORECASE))
-    for kw in CORRECTION_PATTERNS
-)
-
-
-def detect_correction(user_message: str) -> str | None:
-    """Return the trigger string when the message looks like a correction of
-    the previous reply — otherwise None. Heuristic, not NLP."""
-    msg = user_message.lower().strip()
-    # Corrections are usually short. Skip long sentences.
-    if len(msg) > 100:
-        return None
-    for kw, rx in _CORRECTION_REGEXES:
-        if rx.search(msg):
-            return kw
-    return None
+# --- Correction signal rendering (P6 closed-loop) ---
+#
+# Detection itself is done by the LLM classifier in core.classify_correction —
+# language-neutral. These helpers only RENDER the signal once detection has
+# fired.
 
 
 def build_correction_note(last_response_event: dict | None,
@@ -153,42 +129,27 @@ def build_correction_note(last_response_event: dict | None,
     )
 
 
-# --- Broken-promise detection (anti-hallucination) ---
-
-MEMORY_PROMISE_PATTERNS = (
-    "noted", "i'll note", "i will note", "i'll remember",
-    "i will remember", "remembered", "saving that", "saved that",
-    "i'll save", "i will save", "writing that down", "wrote that down",
-)
+# --- Broken-promise note rendering (anti-hallucination) ---
+#
+# Detection is done by core.classify_memory_promise. The caller passes the
+# classification result into this builder.
 
 
-def detect_memory_promise(text: str) -> str | None:
-    """Return the matched phrase when the text contains a memory-write
-    promise (filler-phrase detector). If the model says such a thing
-    without running a code block → hallucination signal."""
-    msg = (text or "").lower()
-    for pat in MEMORY_PROMISE_PATTERNS:
-        if pat in msg:
-            return pat
-    return None
-
-
-def build_broken_promise_note(last_response_event: dict | None) -> str:
-    """If the last reply said 'noted' / 'gemerkt' but no memory write
-    happened → reminder injected into the current iteration."""
-    if not last_response_event:
+def build_broken_promise_note(last_response_event: dict | None,
+                              promise_signal: str = "") -> str:
+    """Render the broken-promise reminder when the classifier flagged the
+    previous reply as a memory-write promise WITHOUT a code block."""
+    if not last_response_event or not promise_signal:
         return ""
     if last_response_event.get("blocks_executed", 0) != 0:
         return ""
     last_text = last_response_event.get("final_text") or ""
-    phrase = detect_memory_promise(last_text)
-    if not phrase:
-        return ""
     return (
-        f"BROKEN-PROMISE: in your previous reply you said \"{phrase}…\""
-        f" — but you wrote NO memory.\n"
+        "BROKEN-PROMISE: in your previous reply you claimed to have "
+        "remembered / noted / saved something — but you wrote NO "
+        "memory.\n"
         f"Previous reply:\n---\n{last_text[:400]}\n---\n"
-        f"Look at the current user message AND the recent conversations, "
-        f"extract the facts worth remembering and write the JSONL "
-        f"line(s) NOW via shell-echo. NO filler phrase without a write."
+        "Look at the current user message AND the recent conversations, "
+        "extract the facts worth remembering and write the JSONL "
+        "line(s) NOW via shell-echo. NO filler phrase without a write."
     )

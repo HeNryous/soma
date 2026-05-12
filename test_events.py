@@ -2,8 +2,8 @@
 import tempfile
 from pathlib import Path
 
-from events import (EventLog, detect_correction, build_correction_note,
-                    render_recent_turns)
+from events import (EventLog, build_correction_note,
+                    build_broken_promise_note, render_recent_turns)
 
 
 def test_log_and_load():
@@ -52,35 +52,17 @@ def test_last():
         print("✓ last")
 
 
-def test_detect_correction():
-    # English triggers
-    assert detect_correction("no, shorter") == "no"
-    assert detect_correction("that is wrong") == "wrong"
-    assert detect_correction("again please") == "again"
-    assert detect_correction("not like that") == "not"
-    # Non-corrections
-    assert detect_correction("What is 2+2?") is None
-    assert detect_correction("Create a file") is None
-    # Long sentences not treated as corrections
-    long_msg = "Create a file " * 10
-    assert detect_correction(long_msg) is None
-    # Word-boundary discipline: "no" must NOT fire inside "node" / "nothing"
-    assert detect_correction("how do nodes work") is None
-    assert detect_correction("there is nothing here") is None
-    print("✓ detect_correction")
-
-
 def test_build_correction_note():
     note = build_correction_note(
         {"final_text": "Here is a very long poem..."},
-        "shorter",
-        "no, shorter",
+        "correction",
+        "shorter please",
     )
     assert "CORRECTION-SIGNAL" in note
-    assert "shorter" in note
+    assert "shorter please" in note
     assert "poem" in note
     # Without last_response → empty string
-    assert build_correction_note(None, "no", "no") == ""
+    assert build_correction_note(None, "correction", "x") == ""
     print("✓ build_correction_note")
 
 
@@ -129,34 +111,21 @@ def test_recent_turns():
         print("✓ recent_turns")
 
 
-def test_detect_memory_promise():
-    from events import detect_memory_promise
-    assert detect_memory_promise("Noted. Cloudly is a neo-cloud.") == "noted"
-    assert detect_memory_promise("I'll remember that.") == "i'll remember"
-    assert detect_memory_promise("Wrote that down for next time.") == "wrote that down"
-    # No promise → None
-    assert detect_memory_promise("Understood, thanks.") is None
-    assert detect_memory_promise("") is None
-    print("✓ detect_memory_promise")
-
-
 def test_build_broken_promise_note():
-    from events import build_broken_promise_note
-    # Broken: promise phrase + blocks_executed=0
+    # With promise signal + blocks_executed=0 → reminder rendered
     ev = {"final_text": "Noted. Cloudly is a neo-cloud provider.",
           "blocks_executed": 0}
-    note = build_broken_promise_note(ev)
+    note = build_broken_promise_note(ev, "memory_promise")
     assert "BROKEN-PROMISE" in note
-    assert "noted" in note
     assert "Cloudly" in note
-    # blocks > 0 → NOT a broken promise
+    # blocks > 0 → NOT a broken promise even with signal
     ev2 = {"final_text": "Noted.", "blocks_executed": 1}
-    assert build_broken_promise_note(ev2) == ""
-    # No promise phrase → empty
-    ev3 = {"final_text": "Understood.", "blocks_executed": 0}
-    assert build_broken_promise_note(ev3) == ""
+    assert build_broken_promise_note(ev2, "memory_promise") == ""
+    # No signal → empty
+    ev3 = {"final_text": "Noted.", "blocks_executed": 0}
+    assert build_broken_promise_note(ev3, "") == ""
     # None → empty
-    assert build_broken_promise_note(None) == ""
+    assert build_broken_promise_note(None, "memory_promise") == ""
     print("✓ build_broken_promise_note")
 
 
@@ -184,11 +153,9 @@ if __name__ == "__main__":
     test_log_and_load()
     test_by_type_and_recent()
     test_last()
-    test_detect_correction()
     test_build_correction_note()
     test_robust_to_garbage()
     test_recent_turns()
     test_render_recent_turns()
-    test_detect_memory_promise()
     test_build_broken_promise_note()
     print("\nAll event tests passed.")
