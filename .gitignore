@@ -1,0 +1,25 @@
+# User-Daten + lokale State (alles unter data/)
+.env
+data/
+*.bak.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Logs
+*.log
