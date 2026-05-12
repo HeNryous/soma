@@ -71,8 +71,8 @@ COMPRESS_COOLDOWN_ITERS = 10  # earliest re-trigger after N more iters
 CONFLICT_MIN_TAG_OVERLAP = 2
 
 BASE_PROMPT = """\
-You are a helpful companion. Answer in the user's language; if they
-write to you in German, answer in German.
+You are a helpful companion. Answer in the language the user is
+talking to you in.
 
 Always address the user DIRECTLY (you / your). Even when memories
 phrase facts in the third person ("Alex works at Acme", "Alex looks

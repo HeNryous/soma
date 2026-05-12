@@ -53,22 +53,20 @@ def test_last():
 
 
 def test_detect_correction():
-    # German triggers still supported (user may write in German)
-    assert detect_correction("Nein, kürzer") == "nein"
-    assert detect_correction("kürzer bitte") == "kürzer"
-    assert detect_correction("Das ist falsch") == "falsch"
-    assert detect_correction("nochmal bitte") == "nochmal"
     # English triggers
     assert detect_correction("no, shorter") == "no"
     assert detect_correction("that is wrong") == "wrong"
+    assert detect_correction("again please") == "again"
+    assert detect_correction("not like that") == "not"
     # Non-corrections
     assert detect_correction("What is 2+2?") is None
     assert detect_correction("Create a file") is None
     # Long sentences not treated as corrections
     long_msg = "Create a file " * 10
     assert detect_correction(long_msg) is None
-    # Word-boundary discipline: "no" must NOT fire inside "node" or "nothing"
+    # Word-boundary discipline: "no" must NOT fire inside "node" / "nothing"
     assert detect_correction("how do nodes work") is None
+    assert detect_correction("there is nothing here") is None
     print("✓ detect_correction")
 
 
@@ -133,13 +131,9 @@ def test_recent_turns():
 
 def test_detect_memory_promise():
     from events import detect_memory_promise
-    # English phrases
     assert detect_memory_promise("Noted. Cloudly is a neo-cloud.") == "noted"
     assert detect_memory_promise("I'll remember that.") == "i'll remember"
-    # German phrases still supported
-    assert detect_memory_promise("Ich notiere das.") == "ich notier"
-    assert detect_memory_promise("Ich behalte es im Kopf.") == "ich behalte"
-    assert detect_memory_promise("Habe ich gespeichert.") == "gespeichert"
+    assert detect_memory_promise("Wrote that down for next time.") == "wrote that down"
     # No promise → None
     assert detect_memory_promise("Understood, thanks.") is None
     assert detect_memory_promise("") is None

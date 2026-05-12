@@ -110,15 +110,11 @@ def render_recent_turns(pairs: list[dict], max_chars: int = 200) -> str:
 import re as _re
 
 # Matched with word boundaries to avoid false positives (e.g. "no" must
-# not fire inside "node" / "nochmal"). For German triggers we keep the
-# substring path because some phrases contain spaces ("stimmt nicht").
+# not fire inside "node" / "nothing").
 CORRECTION_PATTERNS = (
     "no", "not", "wrong", "shorter", "different", "actually",
     "doesn't fit", "again", "too long", "too short", "too much",
     "not like that", "do it differently",
-    # German triggers — user may write in German
-    "nein", "kürzer", "knapper", "anders", "falsch", "stimmt nicht",
-    "passt nicht", "nochmal", "zu lang", "zu kurz", "zu viel",
 )
 
 _CORRECTION_REGEXES = tuple(
@@ -160,17 +156,9 @@ def build_correction_note(last_response_event: dict | None,
 # --- Broken-promise detection (anti-hallucination) ---
 
 MEMORY_PROMISE_PATTERNS = (
-    # English filler phrases
     "noted", "i'll note", "i will note", "i'll remember",
     "i will remember", "remembered", "saving that", "saved that",
     "i'll save", "i will save", "writing that down", "wrote that down",
-    # German filler phrases (model may answer in German)
-    "gemerkt", "ich merke", "ich merk ", "ich werde mir merken",
-    "ich speicher", "gespeichert", "speichere das",
-    "ich notier", "notiert",
-    "ich schreib mir auf", "schreib das auf",
-    "ich behalte", "behalt ich",
-    "ich habe es",
 )
 
 
