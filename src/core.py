@@ -318,39 +318,30 @@ async def compress_middle(client: httpx.AsyncClient,
     return head + [summary_msg] + tail
 
 
-MODEL_CALL_TIMEOUT = 300.0  # 5 min — reasoning models on long contexts
-                            # routinely push past 3 min on the 5th-6th
-                            # iteration of a multi-block task.
+# No read timeout — reasoning models on long contexts can take
+# arbitrarily long, and we'd rather wait than fail the user's turn.
+# Connect timeout stays small so the bot fails fast if vLLM is down.
+MODEL_CALL_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=None,
+    write=None,
+    pool=10.0,
+)
 
 
 async def call_model(client: httpx.AsyncClient, messages: list[dict],
                      *, max_tokens: int = 4096,
-                     temperature: float = 0.7,
-                     _retry: bool = True) -> str:
-    try:
-        r = await client.post(
-            VLLM_URL,
-            json={
-                "model": MODEL,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            },
-            timeout=MODEL_CALL_TIMEOUT,
-        )
-    except (httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
-        # vLLM is occasionally slow at the end of a long-context multi-iter
-        # run. Retry ONCE before bubbling up — the user gets an error
-        # otherwise. Classifier calls (max_tokens=5) are passed
-        # _retry=False so a single hang can't double the failure path.
-        if _retry:
-            logging.getLogger("soma").warning(
-                "call_model timeout (%s) — retrying once", type(exc).__name__)
-            return await call_model(client, messages,
-                                    max_tokens=max_tokens,
-                                    temperature=temperature,
-                                    _retry=False)
-        raise
+                     temperature: float = 0.7) -> str:
+    r = await client.post(
+        VLLM_URL,
+        json={
+            "model": MODEL,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        },
+        timeout=MODEL_CALL_TIMEOUT,
+    )
     r.raise_for_status()
     msg = r.json()["choices"][0]["message"]
     # Reasoning models can have content=null; reasoning_content is the fallback.
@@ -390,7 +381,6 @@ async def classify_correction(client: httpx.AsyncClient,
              {"role": "user", "content": prompt}],
             max_tokens=5,
             temperature=0.0,
-            _retry=False,
         )
     except Exception:
         return None
@@ -421,7 +411,6 @@ async def classify_memory_promise(client: httpx.AsyncClient,
              {"role": "user", "content": prompt}],
             max_tokens=5,
             temperature=0.0,
-            _retry=False,
         )
     except Exception:
         return None
