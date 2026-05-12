@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/banner.jpg" alt="Soma — a lightweight, model-agnostic agent harness that learns through interaction" width="800">
+</p>
+
 # Soma
 
 A lightweight, model-agnostic agent harness that learns through interaction.
