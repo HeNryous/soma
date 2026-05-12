@@ -234,10 +234,10 @@ for retro.
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-account>/soma.git
+git clone https://github.com/HeNryous/soma.git
 cd soma
 ./install.sh        # check prereqs, create venv, install deps, build sandbox, run tests
-$EDITOR .env        # paste your Telegram token + numeric chat-id
+# then edit .env: paste your Telegram token, chat-id, LLM endpoint + model
 ./start_soma.sh     # run the bot
 ```
 
@@ -287,7 +287,8 @@ docker run -d --name soma-sandbox --network bridge --restart unless-stopped \
   -v "$PWD/data/sandbox/workspace:/workspace" \
   -v "$PWD/data/sandbox/inbox:/inbox" \
   -w /workspace python:3.12-slim sleep infinity
-cp .env.example .env && $EDITOR .env
+cp .env.example .env
+# then edit .env: paste your Telegram token, chat-id, LLM endpoint + model
 ./start_soma.sh
 ```
 
