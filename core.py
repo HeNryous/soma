@@ -39,7 +39,7 @@ try:
 except Exception:
     pass
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 VLLM_URL = _os.environ.get("VLLM_BASE_URL",
                            "http://localhost:8000/v1").rstrip("/") \

@@ -19,6 +19,20 @@ under a leading `0.` until the architecture is stable enough for `1.0`.
 
 _Nothing yet._
 
+## [0.2.1] — 2026-05-12
+
+### Added
+
+- **`update.sh`** — pulls `origin/<current-branch>`, re-runs `install.sh`,
+  restarts `soma.service` if it was active.
+  - **Auto-rollback** via `git reset --hard` if `install.sh` exits non-zero
+    (covers failed tests) or if the service fails to start within 2s after
+    the update. Old version is restored and the service restarted on it.
+  - Refuses to run on a dirty working tree (`data/` is gitignored so user
+    state is never at risk during rollback).
+  - Shows the incoming commit list and asks for confirmation; `--yes`
+    skips prompts for cron use.
+
 ## [0.2.0] — 2026-05-12
 
 One-shot installer pipeline. A fresh clone can now reach a runnable bot

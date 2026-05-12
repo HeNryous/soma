@@ -233,6 +233,9 @@ $EDITOR .env        # paste your Telegram token + numeric chat-id
 
 That's it. `install.sh` is idempotent — safe to re-run after a pull.
 
+To pull updates later: `./update.sh` (auto-rolls back if tests fail or the
+service won't restart). `./update.sh --yes` skips prompts for cron.
+
 What `install.sh` does:
 
 1. Checks `python3 >= 3.10`, `docker`, `pip`
@@ -371,6 +374,7 @@ soma/
 ├── envfile.py         — minimal .env parser (no python-dotenv)
 ├── start_soma.sh      — convenience launcher (uses .venv/ if present)
 ├── install.sh         — one-shot installer: prereq-check, venv, deps, sandbox, tests
+├── update.sh          — pull + re-install + restart, with auto-rollback on failure
 ├── requirements.txt   — three host-side Python deps
 ├── soma.service       — example systemd unit (cp to /etc/systemd/system/)
 ├── test_*.py          — eight unit-test files, ~50 tests, all green
